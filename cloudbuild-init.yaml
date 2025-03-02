@@ -1,0 +1,49 @@
+steps:
+  # Create a Cloud Storage bucket for build artifacts if it doesn't exist
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: /bin/bash
+    args:
+      - '-c'
+      - |
+        gsutil mb -p $PROJECT_ID gs://$PROJECT_ID-build-artifacts || echo "Bucket already exists"
+  
+  # Create VPC connector if it doesn't exist
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: /bin/bash
+    args:
+      - '-c'
+      - |
+        gcloud compute networks vpc-access connectors describe crawlweb-connector --region=us-west2 || \
+        gcloud compute networks vpc-access connectors create crawlweb-connector \
+          --region=us-west2 \
+          --network=default \
+          --range=10.8.0.0/28
+
+  # Create Redis instance if it doesn't exist
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: /bin/bash
+    args:
+      - '-c'
+      - |
+        gcloud redis instances describe crawlweb-redis --region=us-west2 || \
+        gcloud redis instances create crawlweb-redis \
+          --size=1 \
+          --region=us-west2 \
+          --tier=basic \
+          --redis-version=redis_6_x
+
+  # Create a Cloud Scheduler job for health checks
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: /bin/bash
+    args:
+      - '-c'
+      - |
+        gcloud scheduler jobs describe crawlweb-healthcheck --location=us-west2 || \
+        gcloud scheduler jobs create http crawlweb-healthcheck \
+          --location=us-west2 \
+          --schedule="*/5 * * * *" \
+          --uri="https://crawlweb-api-dot-$PROJECT_ID.run.app/v1/health/liveness" \
+          --http-method=GET
+
+options:
+  logging: CLOUD_LOGGING_ONLY

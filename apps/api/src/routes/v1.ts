@@ -11,6 +11,7 @@ import { crawlCancelController } from "../controllers/v1/crawl-cancel";
 import { scrapeStatusController } from "../controllers/v1/scrape-status";
 import { livenessController } from "../controllers/v1/liveness";
 import { readinessController } from "../controllers/v1/readiness";
+import { htmlToMarkdownController } from "../controllers/v1/html-to-markdown";
 import expressWs from "express-ws";
 
 export function authMiddleware(
@@ -75,6 +76,8 @@ v1Router.post(
 );
 
 v1Router.post("/map", authMiddleware(RateLimiterMode.Map), wrap(mapController));
+
+v1Router.post("/html-to-markdown", wrap(htmlToMarkdownController));
 
 v1Router.get(
   "/crawl/:jobId",

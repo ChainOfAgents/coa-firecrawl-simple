@@ -1,0 +1,45 @@
+steps:
+  # No need to rebuild the image since the worker uses the same image as the API
+  # We'll reuse the image built by the API build
+  
+  # Get Redis IP 
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: /bin/bash
+    args:
+      - '-c'
+      - |
+        REDIS_IP=$(gcloud redis instances describe crawlweb-redis --region=us-west2 --format='get(host)')
+        echo "$$REDIS_IP" > /workspace/redis-ip.txt
+  
+  # Get Puppeteer Service URL from Cloud Storage
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: /bin/bash
+    args:
+      - '-c'
+      - |
+        gsutil cp gs://$PROJECT_ID-build-artifacts/puppeteer-service-url.txt /workspace/ || echo "https://puppeteer-service-url-not-found.run.app/scrape" > /workspace/puppeteer-service-url.txt
+    
+  # Deploy worker to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: /bin/bash
+    args:
+      - '-c'
+      - |
+        REDIS_IP=$(cat /workspace/redis-ip.txt)
+        PLAYWRIGHT_URL=$(cat /workspace/puppeteer-service-url.txt)
+        
+        gcloud run deploy crawlweb-worker \
+          --image=gcr.io/$PROJECT_ID/crawlweb-api:latest \
+          --platform=managed \
+          --region=us-west2 \
+          --cpu=1 \
+          --memory=1Gi \
+          --concurrency=20 \
+          --command="pnpm,run,start:worker" \
+          --vpc-connector=crawlweb-connector \
+          --min-instances=1 \
+          --max-instances=5 \
+          --set-env-vars="NUM_WORKERS_PER_QUEUE=8,REDIS_URL=redis://${REDIS_IP}:6379,REDIS_RATE_LIMIT_URL=redis://${REDIS_IP}:6379,PLAYWRIGHT_MICROSERVICE_URL=${PLAYWRIGHT_URL}"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
