@@ -78,3 +78,54 @@ export async function redisHealthController(req: Request, res: Response) {
       .json({ status: "unhealthy", message: error.message });
   }
 }
+
+export async function checkRedisContent(req: Request, res: Response) {
+  try {
+    // Check if Redis is connected
+    if (redisRateLimitClient.status !== 'ready') {
+      return res.status(500).json({
+        success: false,
+        message: 'Redis client is not ready',
+        redisStatus: redisRateLimitClient.status
+      });
+    }
+
+    // Look for web-scraper-cache keys with pattern matching
+    const keys = await redisRateLimitClient.keys('web-scraper-cache:*');
+    
+    // Get content for each key (limit to first 5 keys for performance)
+    const results = [];
+    for (const key of keys.slice(0, 5)) {
+      const content = await redisRateLimitClient.get(key);
+      let parsedContent;
+      try {
+        parsedContent = JSON.parse(content);
+        // Truncate the rawHtml to avoid overwhelming response
+        if (parsedContent && parsedContent.rawHtml && parsedContent.rawHtml.length > 1000) {
+          parsedContent.rawHtml = parsedContent.rawHtml.substring(0, 1000) + '... [truncated]';
+        }
+      } catch (e) {
+        parsedContent = { error: 'Unable to parse JSON', content: content?.substring(0, 100) + '...' };
+      }
+      
+      results.push({
+        key,
+        content: parsedContent
+      });
+    }
+
+    return res.json({
+      success: true,
+      keyCount: keys.length,
+      keys: keys.slice(0, 20), // Show first 20 keys
+      sampleContent: results
+    });
+  } catch (error) {
+    console.error('Error checking Redis content:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error checking Redis content',
+      error: error.message
+    });
+  }
+}
