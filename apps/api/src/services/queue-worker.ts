@@ -31,7 +31,23 @@ import { PlanType } from "../types";
 import { getJobs } from "../../src/controllers/v1/crawl-status";
 import { configDotenv } from "dotenv";
 import { callWebhook } from "../../src/scraper/WebScraper/single_url";
+import express from "express";
 configDotenv();
+
+// Set up a simple HTTP server for Cloud Run health checks
+const app = express();
+const port = process.env.PORT || 3002;
+const host = process.env.HOST || "0.0.0.0";
+
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.status(200).send("Worker is healthy");
+});
+
+// Start the HTTP server
+const server = app.listen(Number(port), host, () => {
+  Logger.info(`Worker healthcheck server listening on port ${port}`);
+});
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
