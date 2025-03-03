@@ -40,7 +40,7 @@ steps:
           --min-instances=0 \
           --max-instances=10 \
           --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
-          --set-env-vars="NODE_ENV=production,HOST=0.0.0.0,NUM_WORKERS_PER_QUEUE=8,REDIS_URL=redis://$${REDIS_IP}:6379,REDIS_RATE_LIMIT_URL=redis://$${REDIS_IP}:6379,PLAYWRIGHT_MICROSERVICE_URL=$${PLAYWRIGHT_URL}"
+          --set-env-vars="NODE_ENV=production,HOST=0.0.0.0,NUM_WORKERS_PER_QUEUE=8,REDIS_URL=redis://$${REDIS_IP}:6379,REDIS_RATE_LIMIT_URL=redis://$${REDIS_IP}:6379,PLAYWRIGHT_MICROSERVICE_URL=$${PLAYWRIGHT_URL},LOGGING_LEVEL=DEBUG"
 
 images:
   - 'us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:${COMMIT_SHA}'

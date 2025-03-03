@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from "uuid";
 import { addScrapeJobRaw, waitForJob } from "../../services/queue-jobs";
 import { getJobPriority } from "../../lib/job-priority";
 import { PlanType } from "../../types";
+import { redisRateLimitClient } from "../../services/rate-limiter";
 
 /**
  * @openapi
@@ -142,5 +143,15 @@ export async function scrapeController(
     success: true,
     data: legacyDocumentConverter(doc),
     scrape_id: origin?.includes("website") ? jobId : undefined,
+    debug: {
+      redisStatus: redisRateLimitClient.status,
+      rawHtmlLength: doc && doc.rawHtml ? doc.rawHtml.length : 0,
+      htmlLength: doc && doc.html ? doc.html.length : 0,
+      markdownLength: doc && doc.markdown ? doc.markdown.length : 0,
+      jobId: jobId,
+      formats: req.body.formats,
+      includeRawHtml: pageOptions?.includeRawHtml,
+      pageOptionsSet: !!pageOptions
+    }
   });
 }
