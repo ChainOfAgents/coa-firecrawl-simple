@@ -1,7 +1,7 @@
 steps:
   # Build the API image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/${PROJECT_ID}/crawlweb-api:${COMMIT_SHA}', '-t', 'gcr.io/${PROJECT_ID}/crawlweb-api:latest', '-f', 'apps/api/Dockerfile', '.']
+    args: ['build', '-t', 'gcr.io/${PROJECT_ID}/crawlweb-api:${COMMIT_SHA}', '-t', 'gcr.io/${PROJECT_ID}/crawlweb-api:latest', '-f', 'Dockerfile', './apps/api']
     
   # Push the container image to Container Registry
   - name: 'gcr.io/cloud-builders/docker'
