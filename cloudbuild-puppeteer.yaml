@@ -28,7 +28,7 @@ steps:
         
         # Save the URL of the deployed puppeteer service for other builds
         SERVICE_URL=$(gcloud run services describe crawlweb-puppeteer --platform=managed --region=us-west2 --format='value(status.url)')
-        echo "${SERVICE_URL}/scrape" > /workspace/puppeteer-service-url.txt
+        echo "$${SERVICE_URL}/scrape" > /workspace/puppeteer-service-url.txt
         gsutil cp /workspace/puppeteer-service-url.txt gs://${PROJECT_ID}-build-artifacts/puppeteer-service-url.txt
 
 images:
