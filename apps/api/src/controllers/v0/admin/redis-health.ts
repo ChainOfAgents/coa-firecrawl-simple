@@ -17,7 +17,12 @@ export async function redisHealthController(req: Request, res: Response) {
   };
 
   try {
-    const queueRedis = new Redis(process.env.REDIS_URL);
+    // For testing - use hardcoded Redis URL
+    const hardcodedRedisURL = 'redis://10.130.67.11:6379';
+    Logger.info(`[REDIS-HEALTH] [HARDCODED] Using Redis URL: ${hardcodedRedisURL}`);
+    Logger.info(`[REDIS-HEALTH] Original env REDIS_URL value was: ${process.env.REDIS_URL || 'not set'}`);
+    
+    const queueRedis = new Redis(hardcodedRedisURL);
 
     const testKey = "test";
     const testValue = "test";

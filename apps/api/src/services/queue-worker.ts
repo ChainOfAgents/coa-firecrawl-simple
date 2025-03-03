@@ -62,6 +62,10 @@ const connectionMonitorInterval =
   Number(process.env.CONNECTION_MONITOR_INTERVAL) || 10;
 const gotJobInterval = Number(process.env.CONNECTION_MONITOR_INTERVAL) || 20;
 
+// Get environment variables for resource thresholds with much higher defaults
+const MAX_CPU = Number(process.env.MAX_CPU) || 0.95; // 95% CPU usage threshold
+const MAX_RAM = Number(process.env.MAX_RAM) || 0.95; // 95% RAM usage threshold
+
 const processJobInternal = async (token: string, job: Job) => {
   const extendLockInterval = setInterval(async () => {
     Logger.info(`🐂 Worker extending lock on job ${job.id}`);
@@ -98,6 +102,21 @@ const workerFun = async (
   queueName: string,
   processJobInternal: (token: string, job: Job) => Promise<any>,
 ) => {
+  Logger.info(`🔄 Starting worker for queue: ${queueName}`);
+  
+  // For testing - use hardcoded Redis URL
+  const hardcodedRedisURL = 'redis://10.130.67.11:6379';
+  Logger.info(`🔄 [HARDCODED] Using Redis URL: ${hardcodedRedisURL}`);
+  Logger.info(`🔄 Original env REDIS_URL value was: ${process.env.REDIS_URL || 'not set'}`);
+  
+  try {
+    // Test Redis connection
+    const pingResponse = await redisConnection.ping();
+    Logger.info(`🔄 Redis connection test: ${pingResponse}`);
+  } catch (error) {
+    Logger.error(`🔄 Redis connection test failed: ${error.message}`);
+  }
+  
   const worker = new Worker(queueName, null, {
     connection: redisConnection,
     lockDuration: 1 * 60 * 1000,
@@ -105,10 +124,26 @@ const workerFun = async (
     maxStalledCount: 10,
   });
 
+  worker.on('error', err => {
+    Logger.error(`🔄 Worker error: ${err.message}`);
+  });
+
+  worker.on('failed', (job, err) => {
+    Logger.error(`🔄 Job ${job?.id} failed: ${err.message}`);
+  });
+
+  worker.on('completed', job => {
+    Logger.info(`🔄 Job ${job?.id} completed successfully`);
+  });
+
   worker.startStalledCheckTimer();
+  Logger.info(`🔄 Started stalled job check timer`);
 
   const monitor = await systemMonitor;
+  Logger.info(`🔄 System resource monitor initialized`);
 
+  let attemptCount = 0;
+  
   while (true) {
     if (isShuttingDown) {
       console.log("No longer accepting new jobs. SIGINT");
@@ -116,18 +151,38 @@ const workerFun = async (
     }
     const token = uuidv4();
     const canAcceptConnection = await monitor.acceptConnection();
+    
     if (!canAcceptConnection) {
-      console.log("Cant accept connection");
+      Logger.debug(`🔄 Cannot accept connection due to resource constraints. CPU/RAM limits reached.`);
       await sleep(cantAcceptConnectionInterval);
       continue;
     }
 
-    const job = await worker.getNextJob(token);
-    if (job) {
-      processJobInternal(token, job);
-
-      await sleep(gotJobInterval);
-    } else {
+    try {
+      Logger.debug(`🔄 Attempt #${++attemptCount} to get next job from queue ${queueName}`);
+      const job = await worker.getNextJob(token);
+      
+      if (job) {
+        Logger.info(`🔄 Got job ${job.id} from queue. Data: ${JSON.stringify({
+          url: job.data.url,
+          mode: job.data.mode,
+          team_id: job.data.team_id,
+          jobId: job.id,
+          priority: job.opts.priority
+        })}`);
+        
+        processJobInternal(token, job);
+        Logger.debug(`🔄 Job ${job.id} processing started`);
+        await sleep(gotJobInterval);
+      } else {
+        // Only log every 10 attempts to reduce log noise
+        if (attemptCount % 10 === 0) {
+          Logger.debug(`🔄 No jobs available in queue ${queueName} after ${attemptCount} attempts`);
+        }
+        await sleep(connectionMonitorInterval);
+      }
+    } catch (error) {
+      Logger.error(`🔄 Error getting next job: ${error.message}`);
       await sleep(connectionMonitorInterval);
     }
   }
@@ -136,7 +191,8 @@ const workerFun = async (
 workerFun(scrapeQueueName, processJobInternal);
 
 async function processJob(job: Job, token: string) {
-  Logger.info(`🐂 Worker taking job ${job.id}`);
+  const startTime = Date.now();
+  Logger.info(`🐂 Worker processing job ${job.id} - URL: ${job.data.url}`);
 
   if (
     job.data.url &&
@@ -164,18 +220,30 @@ async function processJob(job: Job, token: string) {
       current_url: "",
     });
     const start = Date.now();
-
+    Logger.debug(`🐂 Job ${job.id} - Starting web scraper pipeline`);
+    
     const { success, message, docs } = await startWebScraperPipeline({
       job,
       token,
     });
+    
+    const scrapeDuration = Date.now() - start;
+    Logger.info(`🐂 Job ${job.id} - Web scraper pipeline completed in ${scrapeDuration}ms - Success: ${success}, Message: ${message}`);
 
     if (!success) {
+      Logger.error(`🐂 Job ${job.id} failed: ${message}`);
       throw new Error(message);
     }
+    
+    const docsCount = docs ? docs.length : 0;
+    Logger.info(`🐂 Job ${job.id} - Retrieved ${docsCount} documents`);
+    
     const end = Date.now();
+    const totalDuration = end - startTime;
+    Logger.info(`🐂 Job ${job.id} - Total processing time: ${totalDuration}ms`);
 
     const rawHtml = docs[0] ? docs[0].rawHtml : "";
+    Logger.debug(`🐂 Job ${job.id} - Raw HTML length: ${rawHtml ? rawHtml.length : 0} characters`);
 
     const data = {
       success,
@@ -193,6 +261,7 @@ async function processJob(job: Job, token: string) {
     };
 
     if (job.data.crawl_id) {
+      Logger.debug(`🐂 Job ${job.id} - Updating crawl job status for crawl ID: ${job.data.crawl_id}`);
       await addCrawlJobDone(job.data.crawl_id, job.id);
 
       const sc = (await getCrawl(job.data.crawl_id)) as StoredCrawl;

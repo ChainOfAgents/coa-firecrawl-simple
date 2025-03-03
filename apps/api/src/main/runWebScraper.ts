@@ -19,44 +19,59 @@ export async function startWebScraperPipeline({
   token: string;
 }) {
   let partialDocs: Document[] = [];
-  return (await runWebScraper({
-    url: job.data.url,
-    mode: job.data.mode,
-    crawlerOptions: job.data.crawlerOptions,
-    pageOptions: {
-      ...job.data.pageOptions,
-      ...(job.data.crawl_id
-        ? {
-            includeRawHtml: true,
+  Logger.info(`🌐 Starting web scraper pipeline for job ${job.id} - URL: ${job.data.url}`);
+  
+  try {
+    Logger.debug(`🌐 Job ${job.id} - Mode: ${job.data.mode}, Team ID: ${job.data.team_id}`);
+    
+    const startTime = Date.now();
+    const result = await runWebScraper({
+      url: job.data.url,
+      mode: job.data.mode,
+      crawlerOptions: job.data.crawlerOptions,
+      pageOptions: {
+        ...job.data.pageOptions,
+        ...(job.data.crawl_id
+          ? {
+              includeRawHtml: true,
+            }
+          : {}),
+      },
+      webhookUrl: job.data.webhookUrl,
+      webhookMetadata: job.data.webhookMetadata,
+      inProgress: (progress) => {
+        Logger.debug(`🌐 Job ${job.id} in progress - Status: ${progress.status}, Current: ${progress.current}/${progress.total}`);
+        if (progress.currentDocument) {
+          partialDocs.push(progress.currentDocument);
+          if (partialDocs.length > 50) {
+            partialDocs = partialDocs.slice(-50);
           }
-        : {}),
-    },
-    webhookUrl: job.data.webhookUrl,
-    webhookMetadata: job.data.webhookMetadata,
-    inProgress: (progress) => {
-      Logger.debug(`🐂 Job in progress ${job.id}`);
-      if (progress.currentDocument) {
-        partialDocs.push(progress.currentDocument);
-        if (partialDocs.length > 50) {
-          partialDocs = partialDocs.slice(-50);
+          // job.updateProgress({ ...progress, partialDocs: partialDocs });
         }
-        // job.updateProgress({ ...progress, partialDocs: partialDocs });
-      }
-    },
-    onSuccess: (result, mode) => {
-      Logger.debug(`🐂 Job completed ${job.id}`);
-    },
-    onError: (error) => {
-      Logger.error(`🐂 Job failed ${job.id}`);
-      job.moveToFailed(error, token, false);
-    },
-    team_id: job.data.team_id,
-    bull_job_id: job.id.toString(),
-    priority: job.opts.priority,
-    is_scrape: job.data.is_scrape ?? false,
-    crawl_id: job.data.crawl_id,
-  })) as { success: boolean; message: string; docs: Document[] };
+      },
+      onSuccess: (result, mode) => {
+        const duration = Date.now() - startTime;
+        Logger.info(`🌐 Job ${job.id} completed in ${duration}ms - Mode: ${mode}, Result count: ${Array.isArray(result) ? result.length : 0}`);
+      },
+      onError: (error) => {
+        Logger.error(`🌐 Job ${job.id} failed - Error: ${error.message}`);
+        job.moveToFailed(error, token, false);
+      },
+      team_id: job.data.team_id,
+      bull_job_id: job.id.toString(),
+      priority: job.opts.priority,
+      is_scrape: job.data.is_scrape ?? false,
+      crawl_id: job.data.crawl_id,
+    });
+    
+    Logger.info(`🌐 Job ${job.id} - Web scraper completed - Success: ${result.success}, Docs: ${result.docs?.length || 0}`);
+    return result;
+  } catch (error) {
+    Logger.error(`🌐 Job ${job.id} - Web scraper pipeline failed with error: ${error.message}`);
+    throw error;
+  }
 }
+
 export async function runWebScraper({
   url,
   mode,

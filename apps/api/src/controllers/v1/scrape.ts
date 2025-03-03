@@ -64,6 +64,9 @@ export async function scrapeController(
   const pageOptions = legacyScrapeOptions(req.body);
   const jobId = uuidv4();
 
+  // Log the request details
+  Logger.debug(`Scrape request: url=${req.body.url}, timeout=${timeout}ms, jobId=${jobId}`);
+
   const jobPriority = await getJobPriority({
     plan: req.auth.plan as PlanType,
     team_id: req.auth.team_id,
@@ -85,12 +88,18 @@ export async function scrapeController(
     jobPriority
   );
 
+  Logger.debug(`Job ${job.id} added to queue with priority ${jobPriority}`);
+
   let doc: any | undefined;
   try {
+    const startTime = Date.now();
+    Logger.debug(`Waiting for job ${job.id} with timeout ${timeout}ms`);
     doc = (await waitForJob(job.id, timeout))[0];
+    const duration = Date.now() - startTime;
+    Logger.debug(`Job ${job.id} completed in ${duration}ms`);
   } catch (e) {
     Logger.error(`Error in scrapeController: ${e}`);
-    if (e instanceof Error && e.message.startsWith("Job wait")) {
+    if (e instanceof Error && e.message.includes("timeout")) {
       return res.status(408).json({
         success: false,
         error: "Request timed out",
