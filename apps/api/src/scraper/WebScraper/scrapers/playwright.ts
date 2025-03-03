@@ -2,6 +2,7 @@ import axios from "axios";
 import { generateRequestParams } from "../single_url";
 import { universalTimeout } from "../global";
 import { Logger } from "../../../lib/logger";
+import { CloudAuth } from "../../../lib/cloud-auth";
 
 /**
  * Scrapes a URL with Playwright
@@ -30,6 +31,10 @@ export async function scrapeWithPlaywright(
   try {
     const reqParams = await generateRequestParams(url);
     const waitParam = reqParams["params"]?.wait ?? waitFor;
+    
+    // Get authentication token
+    const idToken = await CloudAuth.getIdToken();
+    const authHeader = idToken ? { "Authorization": `Bearer ${idToken}` } : {};
 
     const response = await axios.post(
       process.env.PLAYWRIGHT_MICROSERVICE_URL,
@@ -41,6 +46,7 @@ export async function scrapeWithPlaywright(
       {
         headers: {
           "Content-Type": "application/json",
+          ...authHeader
         },
         timeout: universalTimeout + waitParam,
         transformResponse: [(data) => data],
