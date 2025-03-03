@@ -106,7 +106,7 @@ const workerFun = async (
   Logger.info(`🔄 Starting worker for queue: ${queueName}`);
   
   // For testing - use hardcoded Redis URL
-  const hardcodedRedisURL = 'redis://10.130.67.11:6379';
+  const hardcodedRedisURL = 'redis://10.155.240.35:6379';
   Logger.info(`🔄 [HARDCODED] Using Redis URL: ${hardcodedRedisURL}`);
   Logger.info(`🔄 Original env REDIS_URL value was: ${process.env.REDIS_URL || 'not set'}`);
   

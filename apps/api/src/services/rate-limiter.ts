@@ -74,7 +74,7 @@ const RATE_LIMITS = {
 };
 
 // For testing - use hardcoded Redis URL
-const hardcodedRedisURL = 'redis://10.130.67.11:6379';
+const hardcodedRedisURL = 'redis://10.155.240.35:6379';
 console.log(`[RATE-LIMITER] [HARDCODED] Using Redis URL: ${hardcodedRedisURL}`);
 console.log(`[RATE-LIMITER] Original env REDIS_RATE_LIMIT_URL value was: ${process.env.REDIS_RATE_LIMIT_URL || 'not set'}`);
 
