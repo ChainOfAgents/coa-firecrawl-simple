@@ -7,32 +7,28 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'gcr.io/$PROJECT_ID/puppeteer-service:$COMMIT_SHA']
     
-  # Deploy puppeteer service to Cloud Run
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
-    args:
-      - 'run'
-      - 'deploy'
-      - 'crawlweb-puppeteer'
-      - '--image=gcr.io/$PROJECT_ID/puppeteer-service:$COMMIT_SHA'
-      - '--platform=managed'
-      - '--region=us-west2'
-      - '--cpu=1'
-      - '--memory=2Gi'
-      - '--concurrency=10'
-      - '--timeout=5m'
-      - '--allow-unauthenticated'
-      - '--min-instances=0'
-      - '--max-instances=10'
-    
-  # Save the URL of the deployed puppeteer service for other builds
+  # Deploy puppeteer service to Cloud Run and store URL
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: /bin/bash
     args:
       - '-c'
       - |
+        # Deploy puppeteer service to Cloud Run
+        gcloud run deploy crawlweb-puppeteer \
+          --image=gcr.io/$PROJECT_ID/puppeteer-service:$COMMIT_SHA \
+          --platform=managed \
+          --region=us-west2 \
+          --cpu=1 \
+          --memory=2Gi \
+          --concurrency=10 \
+          --timeout=5m \
+          --allow-unauthenticated \
+          --min-instances=0 \
+          --max-instances=10
+        
+        # Save the URL of the deployed puppeteer service for other builds
         SERVICE_URL=$(gcloud run services describe crawlweb-puppeteer --platform=managed --region=us-west2 --format='value(status.url)')
-        echo "$$SERVICE_URL/scrape" > /workspace/puppeteer-service-url.txt
+        echo "${SERVICE_URL}/scrape" > /workspace/puppeteer-service-url.txt
         gsutil cp /workspace/puppeteer-service-url.txt gs://$PROJECT_ID-build-artifacts/puppeteer-service-url.txt
 
 images:
