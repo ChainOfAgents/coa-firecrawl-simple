@@ -31,7 +31,8 @@ steps:
           --timeout=5m \
           --min-instances=0 \
           --max-instances=10 \
-          --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com
+          --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
+          --set-env-vars="NODE_ENV=production,HOST=0.0.0.0"
         
         # Save the URL of the deployed puppeteer service for other builds
         SERVICE_URL=$(gcloud run services describe puppeteer-service-firecrawl-simple --platform=managed --region=us-west2 --format='value(status.url)')
