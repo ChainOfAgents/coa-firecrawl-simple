@@ -1,6 +1,17 @@
 import Redis from "ioredis";
-import { redisRateLimitClient } from "./rate-limiter";
 import { Logger } from "../lib/logger";
+
+// Use environment variables for Redis URLs
+const redisRateLimitUrl = process.env.REDIS_RATE_LIMIT_URL;
+if (!redisRateLimitUrl) {
+  Logger.error('[RATE-LIMITER] REDIS_RATE_LIMIT_URL environment variable is not set');
+  throw new Error('REDIS_RATE_LIMIT_URL environment variable is required');
+}
+
+Logger.info(`[RATE-LIMITER] Using Redis URL from environment: ${redisRateLimitUrl}`);
+
+// Initialize Redis client for rate limiting
+const redisRateLimitClient = new Redis(redisRateLimitUrl);
 
 // Listen to 'error' events to the Redis connection
 redisRateLimitClient.on("error", (error) => {
@@ -27,6 +38,25 @@ redisRateLimitClient.on("connect", (err) => {
   try {
     if (!err) Logger.info("Connected to Redis Session Rate Limit Store!");
   } catch (error) {}
+});
+
+// Add connection event handlers
+redisRateLimitClient.on('connect', () => {
+  Logger.info(`[RATE-LIMITER] Redis client connected successfully to: ${redisRateLimitUrl}`);
+});
+
+redisRateLimitClient.on('error', (err) => {
+  Logger.error(`[RATE-LIMITER] Redis client error: ${err.message}`);
+  // Debug full error
+  Logger.error(`[RATE-LIMITER] Full error: ${JSON.stringify(err)}`);
+});
+
+redisRateLimitClient.on('ready', () => {
+  Logger.info(`[RATE-LIMITER] Redis client ready`);
+});
+
+redisRateLimitClient.on('reconnecting', () => {
+  Logger.info(`[RATE-LIMITER] Redis client reconnecting`);
 });
 
 /**

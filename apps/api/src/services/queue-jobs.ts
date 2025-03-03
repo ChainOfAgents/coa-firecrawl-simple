@@ -25,12 +25,16 @@ export function waitForJob(jobId: string, timeout: number) {
           Logger.error(`Job wait timeout for job ${jobId} after ${timeout}ms`);
           reject(new Error("Job wait timeout"));
         } else {
-          // Get the job state and log it for debugging
           const state = await getScrapeQueue().getJobState(jobId);
           const elapsedTime = Date.now() - start;
           
-          if (elapsedTime % 10000 === 0) { // Log every 10 seconds
+          if (elapsedTime % 2000 === 0) {
             Logger.debug(`Waiting for job ${jobId}, state: ${state}, elapsed: ${elapsedTime}ms`);
+            
+            const job = await getScrapeQueue().getJob(jobId);
+            if (!job) {
+              Logger.warn(`Job ${jobId} not found during wait, state: ${state}`);
+            }
           }
           
           if (state === "completed") {
@@ -52,7 +56,7 @@ export function waitForJob(jobId: string, timeout: number) {
           }
         }
       } catch (error) {
-        Logger.error(`Error checking job ${jobId} state: ${error}`);
+        Logger.error(`Error checking job state for ${jobId}: ${error.message}`);
         // Don't reject here, just log the error and continue trying
       }
     }, 500);

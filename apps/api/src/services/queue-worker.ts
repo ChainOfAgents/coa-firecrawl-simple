@@ -78,8 +78,25 @@ const processJobInternal = async (token: string, job: Job) => {
   try {
     const result = await processJob(job, token);
     try {
+      Logger.info(`🐂 Moving job ${job.id} to completed state`);
       await job.moveToCompleted(result.docs, token, false);
-    } catch (e) {}
+      Logger.info(`🐂 Successfully moved job ${job.id} to completed state`);
+      
+      // Verify job state after completion
+      const state = await getScrapeQueue().getJobState(job.id);
+      Logger.info(`🐂 Job ${job.id} state after completion: ${state}`);
+    } catch (e) {
+      Logger.error(`🐂 Error moving job ${job.id} to completed state: ${e.message}`);
+      // Try again with a different approach
+      try {
+        await job.updateProgress(100);
+        // Update the job data in Redis directly through the queue
+        await getScrapeQueue().add(job.name, { ...job.data, completed: true }, { jobId: job.id });
+        Logger.info(`🐂 Alternative completion for job ${job.id} applied`);
+      } catch (altError) {
+        Logger.error(`🐂 Alternative completion also failed for job ${job.id}: ${altError.message}`);
+      }
+    }
   } catch (error) {
     console.log("Job failed, error:", error);
     err = error;
