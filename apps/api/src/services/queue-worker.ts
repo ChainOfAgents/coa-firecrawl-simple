@@ -32,6 +32,7 @@ import { getJobs } from "../../src/controllers/v1/crawl-status";
 import { configDotenv } from "dotenv";
 import { callWebhook } from "../../src/scraper/WebScraper/single_url";
 import express from "express";
+import { Document, DocumentUrl } from "../lib/entities";
 configDotenv();
 
 // Set up a simple HTTP server for Cloud Run health checks
@@ -242,7 +243,9 @@ async function processJob(job: Job, token: string) {
     const totalDuration = end - startTime;
     Logger.info(`🐂 Job ${job.id} - Total processing time: ${totalDuration}ms`);
 
-    const rawHtml = docs[0] ? docs[0].rawHtml : "";
+    // Fix TypeScript issue - check for Document type first
+    const firstDoc = docs[0] as Document;
+    const rawHtml = firstDoc && 'rawHtml' in firstDoc ? firstDoc.rawHtml : "";
     Logger.debug(`🐂 Job ${job.id} - Raw HTML length: ${rawHtml ? rawHtml.length : 0} characters`);
 
     const data = {
@@ -270,9 +273,14 @@ async function processJob(job: Job, token: string) {
         if (!sc.cancelled) {
           const crawler = crawlToCrawler(job.data.crawl_id, sc);
 
+          // Fix TypeScript issue - safely access metadata
+          const firstDoc = docs[0] as Document;
+          const sourceURL = firstDoc && 'metadata' in firstDoc ? firstDoc.metadata?.sourceURL : undefined;
+          const finalURL = sourceURL || ('url' in firstDoc ? firstDoc.url : "");
+
           const links = crawler.extractLinksFromHTML(
             rawHtml,
-            docs[0]?.metadata?.sourceURL ?? docs[0]?.url ?? "",
+            finalURL,
           );
 
           for (const link of links) {
