@@ -17,7 +17,7 @@ steps:
         
         # Deploy worker to Cloud Run
         gcloud run deploy crawlweb-worker \
-          --image=gcr.io/${PROJECT_ID}/crawlweb-api:latest \
+          --image=us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:latest \
           --platform=managed \
           --region=us-west2 \
           --cpu=1 \

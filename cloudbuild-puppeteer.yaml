@@ -4,15 +4,15 @@ steps:
     args:
       [
         'build',
-        '-t', 'gcr.io/${PROJECT_ID}/puppeteer-service:${COMMIT_SHA}',
-        '-t', 'gcr.io/${PROJECT_ID}/puppeteer-service:latest',
+        '-t', 'us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/puppeteer-service:${COMMIT_SHA}',
+        '-t', 'us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/puppeteer-service:latest',
         '-f', 'apps/puppeteer-service-ts/Dockerfile',
         'apps/puppeteer-service-ts'  # Subfolder as the build context
       ]
     
-  # Push the container image to Container Registry
+  # Push the container image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/${PROJECT_ID}/puppeteer-service:${COMMIT_SHA}']
+    args: ['push', 'us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/puppeteer-service:${COMMIT_SHA}']
     
   # Deploy puppeteer service to Cloud Run and store URL
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -22,7 +22,7 @@ steps:
       - |
         # Deploy puppeteer service to Cloud Run
         gcloud run deploy crawlweb-puppeteer \
-          --image=gcr.io/${PROJECT_ID}/puppeteer-service:${COMMIT_SHA} \
+          --image=us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/puppeteer-service:${COMMIT_SHA} \
           --platform=managed \
           --region=us-west2 \
           --cpu=1 \
@@ -39,8 +39,8 @@ steps:
         gsutil cp /workspace/puppeteer-service-url.txt gs://${PROJECT_ID}-build-artifacts/puppeteer-service-url.txt
 
 images:
-  - 'gcr.io/${PROJECT_ID}/puppeteer-service:${COMMIT_SHA}'
-  - 'gcr.io/${PROJECT_ID}/puppeteer-service:latest'
+  - 'us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/puppeteer-service:${COMMIT_SHA}'
+  - 'us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/puppeteer-service:latest'
 
 options:
   logging: CLOUD_LOGGING_ONLY
