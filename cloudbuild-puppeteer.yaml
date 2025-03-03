@@ -21,7 +21,7 @@ steps:
       - '-c'
       - |
         # Deploy puppeteer service to Cloud Run
-        gcloud run deploy crawlweb-puppeteer \
+        gcloud run deploy puppeteer-service-firecrawl-simple \
           --image=us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/puppeteer-service:${COMMIT_SHA} \
           --platform=managed \
           --region=us-west2 \
@@ -29,12 +29,12 @@ steps:
           --memory=2Gi \
           --concurrency=10 \
           --timeout=5m \
-          --allow-unauthenticated \
           --min-instances=0 \
-          --max-instances=10
+          --max-instances=10 \
+          --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com
         
         # Save the URL of the deployed puppeteer service for other builds
-        SERVICE_URL=$(gcloud run services describe crawlweb-puppeteer --platform=managed --region=us-west2 --format='value(status.url)')
+        SERVICE_URL=$(gcloud run services describe puppeteer-service-firecrawl-simple --platform=managed --region=us-west2 --format='value(status.url)')
         echo "$${SERVICE_URL}/scrape" > /workspace/puppeteer-service-url.txt
         gsutil cp /workspace/puppeteer-service-url.txt gs://${PROJECT_ID}-build-artifacts/puppeteer-service-url.txt
 

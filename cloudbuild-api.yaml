@@ -28,7 +28,7 @@ steps:
         PLAYWRIGHT_URL=$(cat /workspace/puppeteer-service-url.txt)
         
         # Deploy API to Cloud Run
-        gcloud run deploy crawlweb-api \
+        gcloud run deploy api-service-firecrawl-simple \
           --image=us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:${COMMIT_SHA} \
           --platform=managed \
           --region=us-west2 \
@@ -37,9 +37,9 @@ steps:
           --concurrency=80 \
           --command="pnpm,run,start:production" \
           --vpc-connector=crawlweb-connector \
-          --allow-unauthenticated \
           --min-instances=0 \
           --max-instances=10 \
+          --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
           --set-env-vars="NUM_WORKERS_PER_QUEUE=8,PORT=8080,HOST=0.0.0.0,REDIS_URL=redis://$${REDIS_IP}:6379,REDIS_RATE_LIMIT_URL=redis://$${REDIS_IP}:6379,PLAYWRIGHT_MICROSERVICE_URL=$${PLAYWRIGHT_URL}"
 
 images:
