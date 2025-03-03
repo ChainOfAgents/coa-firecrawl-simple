@@ -17,25 +17,22 @@ export async function scrapeWithPlaywright(
   waitFor: number = 0,
   headers?: Record<string, string>,
 ): Promise<{ content: string; pageStatusCode?: number; pageError?: string }> {
-  const logParams = {
-    url,
-    scraper: "playwright",
-    success: false,
-    response_code: null,
-    time_taken_seconds: null,
-    error_message: null,
-    html: "",
-    startTime: Date.now(),
-  };
-
+  const startTime = Date.now();
+  Logger.info(`🎭 [Playwright] Starting scrape for URL: ${url}`);
+  
   try {
+    Logger.debug(`🎭 [Playwright] Generating request parameters for ${url}`);
     const reqParams = await generateRequestParams(url);
     const waitParam = reqParams["params"]?.wait ?? waitFor;
+    Logger.debug(`🎭 [Playwright] Wait parameter: ${waitParam}ms`);
     
     // Get authentication token
+    Logger.debug(`🎭 [Playwright] Getting Cloud Auth token`);
     const idToken = await CloudAuth.getIdToken();
     const authHeader = idToken ? { "Authorization": `Bearer ${idToken}` } : {};
+    Logger.debug(`🎭 [Playwright] Auth token ${idToken ? 'obtained' : 'not available'}`);
 
+    Logger.info(`🎭 [Playwright] Making request to Puppeteer service for ${url}`);
     const response = await axios.post(
       process.env.PLAYWRIGHT_MICROSERVICE_URL,
       {
@@ -52,13 +49,12 @@ export async function scrapeWithPlaywright(
         transformResponse: [(data) => data],
       }
     );
+    Logger.info(`🎭 [Playwright] Received response from Puppeteer service: Status ${response.status}`);
 
     if (response.status !== 200) {
-      Logger.debug(
-        `⛏️ Playwright: Failed to fetch url: ${url} | status: ${response.status}, error: ${response.data?.pageError}`
+      Logger.error(
+        `🎭 [Playwright] Failed response for ${url} | Status: ${response.status}, Error: ${response.data?.pageError}`
       );
-      logParams.error_message = response.data?.pageError;
-      logParams.response_code = response.data?.pageStatusCode;
       return {
         content: "",
         pageStatusCode: response.data?.pageStatusCode,
@@ -68,45 +64,43 @@ export async function scrapeWithPlaywright(
 
     const textData = response.data;
     try {
+      Logger.debug(`🎭 [Playwright] Parsing response data for ${url}`);
       const data = JSON.parse(textData);
       const html = data.content;
-      logParams.success = true;
-      logParams.html = html;
-      logParams.response_code = data.pageStatusCode;
-      logParams.error_message = data.pageError;
+      
+      const htmlLength = html ? html.length : 0;
+      Logger.info(`🎭 [Playwright] Successfully parsed response for ${url}. HTML length: ${htmlLength} chars`);
+      
       return {
         content: html ?? "",
         pageStatusCode: data.pageStatusCode,
         pageError: data.pageError,
       };
     } catch (jsonError) {
-      logParams.error_message = jsonError.message || jsonError;
-      Logger.debug(
-        `⛏️ Playwright: Error parsing JSON response for url: ${url} | Error: ${jsonError}`
+      Logger.error(
+        `🎭 [Playwright] JSON parse error for ${url} | Error: ${jsonError.message}`
       );
       return {
         content: "",
         pageStatusCode: null,
-        pageError: logParams.error_message,
+        pageError: jsonError.message,
       };
     }
   } catch (error) {
     if (error.code === "ECONNABORTED") {
-      logParams.error_message = "Request timed out";
-      Logger.debug(`⛏️ Playwright: Request timed out for ${url}`);
+      Logger.error(`🎭 [Playwright] Request timeout for ${url} after ${universalTimeout}ms`);
     } else {
-      logParams.error_message = error.message || error;
-      Logger.debug(
-        `⛏️ Playwright: Failed to fetch url: ${url} | Error: ${error}`
+      Logger.error(
+        `🎭 [Playwright] Request failed for ${url} | Error: ${error.message}`
       );
     }
     return {
       content: "",
       pageStatusCode: null,
-      pageError: logParams.error_message,
+      pageError: error.message,
     };
   } finally {
-    const endTime = Date.now();
-    logParams.time_taken_seconds = (endTime - logParams.startTime) / 1000;
+    const duration = Date.now() - startTime;
+    Logger.info(`🎭 [Playwright] Scraping completed for ${url} in ${duration}ms`);
   }
 }
