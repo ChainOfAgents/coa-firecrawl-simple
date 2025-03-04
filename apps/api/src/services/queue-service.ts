@@ -38,8 +38,8 @@ export const redisConnection = new Redis(redisUrl, {
   showFriendlyErrorStack: true,
   // Disable client name setting which is not supported on GCP Redis
   enableAutoPipelining: false,
-  namePrefix: '', // Disable client name setting
-  keyPrefix: '', // Disable key prefix
+  username: '', // Disable client name setting
+  keyPrefix: '' // Disable key prefix
 });
 
 // Add connection event handlers

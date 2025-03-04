@@ -35,8 +35,8 @@ const redisRateLimitClient = new Redis(redisRateLimitUrl, {
   showFriendlyErrorStack: true,
   // Disable client name setting which is not supported on GCP Redis
   enableAutoPipelining: false,
-  namePrefix: '', // Disable client name setting
-  keyPrefix: '', // Disable key prefix
+  username: '', // Disable client name setting
+  keyPrefix: '' // Disable key prefix
 });
 
 // Listen to 'error' events to the Redis connection
