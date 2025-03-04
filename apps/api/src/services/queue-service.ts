@@ -79,11 +79,6 @@ export function getScrapeQueue(): Queue<any> {
           delay: 1000,
         },
       },
-      // GCP-specific settings
-      settings: {
-        stalledInterval: 30000,
-        maxStalledCount: 1,
-      }
     });
     Logger.info("[QUEUE-SERVICE] Web scraper queue created successfully");
   }

@@ -335,12 +335,6 @@ const workerFun = async (
     {
       connection: redisConnection,
       concurrency: 2,
-      stalledInterval: 300000, // 5 minutes
-      // GCP-specific settings
-      settings: {
-        stalledInterval: 30000,
-        maxStalledCount: 1,
-      }
     }
   );
 
