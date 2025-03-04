@@ -31,8 +31,8 @@ export const redisConnection = new Redis(redisUrl, {
     }
     return false;
   },
-  connectTimeout: 10000,
-  commandTimeout: 5000,
+  connectTimeout: 30000,
+  commandTimeout: 30000,
   // Add GCP-specific settings
   enableOfflineQueue: true,
   showFriendlyErrorStack: true,
@@ -65,7 +65,13 @@ export function getScrapeQueue(): Queue<any> {
   if (!scrapeQueue) {
     Logger.info(`[QUEUE-SERVICE] Creating scrapeQueue with Redis connection`);
     scrapeQueue = new Queue(scrapeQueueName, {
-      connection: redisConnection,
+      connection: {
+        ...redisConnection.options,
+        maxRetriesPerRequest: null,
+        enableReadyCheck: false,
+        connectTimeout: 30000,
+        commandTimeout: 30000,
+      },
       defaultJobOptions: {
         removeOnComplete: {
           age: 90000, // 25 hours
@@ -78,7 +84,7 @@ export function getScrapeQueue(): Queue<any> {
           type: 'exponential',
           delay: 1000,
         },
-      },
+      }
     });
     Logger.info("[QUEUE-SERVICE] Web scraper queue created successfully");
   }
