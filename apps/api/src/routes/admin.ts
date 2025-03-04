@@ -1,5 +1,5 @@
 import express from "express";
-import { redisHealthController, checkRedisContent } from "../controllers/v0/admin/redis-health";
+import { redisHealthController } from "../controllers/v0/admin/redis-health";
 import {
   checkQueuesController,
   cleanBefore24hCompleteJobsController,
@@ -24,8 +24,3 @@ adminRouter.get(
 );
 
 adminRouter.get(`/admin/${process.env.BULL_AUTH_KEY}/queues`, queuesController);
-
-adminRouter.get(
-  `/admin/${process.env.BULL_AUTH_KEY}/check-redis-content`,
-  checkRedisContent
-);

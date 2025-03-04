@@ -73,9 +73,7 @@ class SystemMonitor {
             console.log(`DEBUG: CPU usage: ${(cpuUsage * 100).toFixed(2)}%, Memory usage: ${(memoryUsage * 100).toFixed(2)}%, Thresholds - CPU: ${(MAX_CPU * 100).toFixed(2)}%, RAM: ${(MAX_RAM * 100).toFixed(2)}%`);
         }
 
-        // Temporary: always return true to disable resource checking
-        return true;
-        // return cpuUsage < MAX_CPU && memoryUsage < MAX_RAM;
+        return cpuUsage < MAX_CPU && memoryUsage < MAX_RAM;
     }
 
     public clearCache() {

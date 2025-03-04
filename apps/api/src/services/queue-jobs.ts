@@ -26,17 +26,6 @@ export function waitForJob(jobId: string, timeout: number) {
           reject(new Error("Job wait timeout"));
         } else {
           const state = await getScrapeQueue().getJobState(jobId);
-          const elapsedTime = Date.now() - start;
-          
-          if (elapsedTime % 2000 === 0) {
-            Logger.debug(`Waiting for job ${jobId}, state: ${state}, elapsed: ${elapsedTime}ms`);
-            
-            const job = await getScrapeQueue().getJob(jobId);
-            if (!job) {
-              Logger.warn(`Job ${jobId} not found during wait, state: ${state}`);
-            }
-          }
-          
           if (state === "completed") {
             clearInterval(int);
             const job = await getScrapeQueue().getJob(jobId);
@@ -44,7 +33,7 @@ export function waitForJob(jobId: string, timeout: number) {
               Logger.error(`Job ${jobId} not found after completion`);
               reject(new Error("Job not found after completion"));
             } else {
-              Logger.debug(`Job ${jobId} completed successfully in ${Date.now() - start}ms`);
+              Logger.info(`Job ${jobId} completed successfully in ${Date.now() - start}ms`);
               resolve(job.returnvalue);
             }
           } else if (state === "failed") {

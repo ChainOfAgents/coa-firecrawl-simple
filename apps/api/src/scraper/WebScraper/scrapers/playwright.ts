@@ -9,7 +9,6 @@ import { CloudAuth } from "../../../lib/cloud-auth";
  * @param url The URL to scrape
  * @param waitFor The time to wait for the page to load
  * @param headers The headers to send with the request
- * @param pageOptions The options for the page
  * @returns The scraped content
  */
 export async function scrapeWithPlaywright(
@@ -17,22 +16,13 @@ export async function scrapeWithPlaywright(
   waitFor: number = 0,
   headers?: Record<string, string>,
 ): Promise<{ content: string; pageStatusCode?: number; pageError?: string }> {
-  const startTime = Date.now();
-  Logger.info(`🎭 [Playwright] Starting scrape for URL: ${url}`);
-  
   try {
-    Logger.debug(`🎭 [Playwright] Generating request parameters for ${url}`);
     const reqParams = await generateRequestParams(url);
     const waitParam = reqParams["params"]?.wait ?? waitFor;
-    Logger.debug(`🎭 [Playwright] Wait parameter: ${waitParam}ms`);
-    
-    // Get authentication token
-    Logger.debug(`🎭 [Playwright] Getting Cloud Auth token`);
+
     const idToken = await CloudAuth.getIdToken();
     const authHeader = idToken ? { "Authorization": `Bearer ${idToken}` } : {};
-    Logger.debug(`🎭 [Playwright] Auth token ${idToken ? 'obtained' : 'not available'}`);
 
-    Logger.info(`🎭 [Playwright] Making request to Puppeteer service for ${url}`);
     const response = await axios.post(
       process.env.PLAYWRIGHT_MICROSERVICE_URL,
       {
@@ -49,11 +39,10 @@ export async function scrapeWithPlaywright(
         transformResponse: [(data) => data],
       }
     );
-    Logger.info(`🎭 [Playwright] Received response from Puppeteer service: Status ${response.status}`);
 
     if (response.status !== 200) {
       Logger.error(
-        `🎭 [Playwright] Failed response for ${url} | Status: ${response.status}, Error: ${response.data?.pageError}`
+        `Failed response for ${url} | Status: ${response.status}, Error: ${response.data?.pageError}`
       );
       return {
         content: "",
@@ -64,13 +53,9 @@ export async function scrapeWithPlaywright(
 
     const textData = response.data;
     try {
-      Logger.debug(`🎭 [Playwright] Parsing response data for ${url}`);
       const data = JSON.parse(textData);
       const html = data.content;
-      
-      const htmlLength = html ? html.length : 0;
-      Logger.info(`🎭 [Playwright] Successfully parsed response for ${url}. HTML length: ${htmlLength} chars`);
-      
+
       return {
         content: html ?? "",
         pageStatusCode: data.pageStatusCode,
@@ -78,7 +63,7 @@ export async function scrapeWithPlaywright(
       };
     } catch (jsonError) {
       Logger.error(
-        `🎭 [Playwright] JSON parse error for ${url} | Error: ${jsonError.message}`
+        `JSON parse error for ${url} | Error: ${jsonError.message}`
       );
       return {
         content: "",
@@ -88,10 +73,10 @@ export async function scrapeWithPlaywright(
     }
   } catch (error) {
     if (error.code === "ECONNABORTED") {
-      Logger.error(`🎭 [Playwright] Request timeout for ${url} after ${universalTimeout}ms`);
+      Logger.error(`Request timeout for ${url} after ${universalTimeout}ms`);
     } else {
       Logger.error(
-        `🎭 [Playwright] Request failed for ${url} | Error: ${error.message}`
+        `Request failed for ${url} | Error: ${error.message}`
       );
     }
     return {
@@ -99,8 +84,5 @@ export async function scrapeWithPlaywright(
       pageStatusCode: null,
       pageError: error.message,
     };
-  } finally {
-    const duration = Date.now() - startTime;
-    Logger.info(`🎭 [Playwright] Scraping completed for ${url} in ${duration}ms`);
   }
 }
