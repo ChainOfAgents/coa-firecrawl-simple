@@ -79,9 +79,8 @@ export function getScrapeQueue(): Queue<any> {
           delay: 1000,
         },
       },
-      // Add GCP-specific settings
+      // GCP-specific settings
       settings: {
-        lockDuration: 30000,
         stalledInterval: 30000,
         maxStalledCount: 1,
       }
