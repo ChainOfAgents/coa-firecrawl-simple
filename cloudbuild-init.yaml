@@ -25,8 +25,8 @@ steps:
     args:
       - '-c'
       - |
-        gcloud redis instances describe crawlweb-redis --region=us-west2 || \
-        gcloud redis instances create crawlweb-redis \
+        gcloud redis instances describe crawlweb-redis-noeviction --region=us-west2 || \
+        gcloud redis instances create crawlweb-redis-noeviction \
           --size=1 \
           --region=us-west2 \
           --tier=basic \

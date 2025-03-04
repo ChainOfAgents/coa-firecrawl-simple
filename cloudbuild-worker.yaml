@@ -9,7 +9,7 @@ steps:
       - '-c'
       - |
         # Get Redis IP
-        REDIS_IP=$(gcloud redis instances describe crawlweb-redis --region=us-west2 --format='get(host)')
+        REDIS_IP=$(gcloud redis instances describe crawlweb-redis-noeviction --region=us-west2 --format='get(host)')
         
         # Get Puppeteer Service URL from Cloud Storage (or use fallback)
         gsutil cp gs://${PROJECT_ID}-build-artifacts/puppeteer-service-url.txt /workspace/ 2>/dev/null || echo "https://puppeteer-service-url-not-found.run.app/scrape" > /workspace/puppeteer-service-url.txt
