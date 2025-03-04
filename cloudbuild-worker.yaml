@@ -28,7 +28,7 @@ steps:
           --min-instances=1 \
           --max-instances=5 \
           --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
-          --set-env-vars="NODE_ENV=production,HOST=0.0.0.0,NUM_WORKERS_PER_QUEUE=8,REDIS_IP=$${REDIS_IP},REDIS_URL=redis://$${REDIS_IP}:6379,REDIS_RATE_LIMIT_URL=redis://$${REDIS_IP}:6379,PLAYWRIGHT_MICROSERVICE_URL=$${PLAYWRIGHT_URL},LOGGING_LEVEL=INFO"
+          --set-env-vars="NODE_ENV=production,HOST=0.0.0.0,NUM_WORKERS_PER_QUEUE=8,REDIS_IP=$${REDIS_IP},REDIS_URL=redis://$${REDIS_IP}:6379,REDIS_RATE_LIMIT_URL=redis://$${REDIS_IP}:6379,PLAYWRIGHT_MICROSERVICE_URL=$${PLAYWRIGHT_URL},LOGGING_LEVEL=BUILD"
 
 options:
   logging: CLOUD_LOGGING_ONLY
