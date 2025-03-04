@@ -397,6 +397,22 @@ const workerFun = async (
       stack: err.stack,
       cause: err?.cause ? String(err.cause) : undefined
     }, null, 2)}`);
+    
+    // Handle command timeouts by reconnecting Redis
+    if (err.message.includes('Command timed out')) {
+      Logger.warn('Detected command timeout, attempting to recover Redis connection...');
+      try {
+        // Force a reconnection attempt
+        redisConnection.disconnect();
+        setTimeout(() => {
+          redisConnection.connect().catch(e => {
+            Logger.error(`Failed to reconnect after timeout: ${e.message}`);
+          });
+        }, 1000);
+      } catch (reconnectErr) {
+        Logger.error(`Error during reconnection attempt: ${reconnectErr.message}`);
+      }
+    }
   });
 
   worker.on('failed', (job, err) => {

@@ -31,6 +31,13 @@ export const redisConnection = new Redis(redisUrl, {
     if (err.message.includes('unknown command') || 
         err.message.includes('ERR unknown command')) {
       Logger.error('[QUEUE-SERVICE] Redis compatibility issue detected: your Redis server may not support all commands needed');
+      return true; // Always reconnect for command compatibility issues
+    }
+    
+    // Also reconnect for timeouts
+    if (err.message.includes('timeout') || err.message.includes('timed out')) {
+      Logger.error('[QUEUE-SERVICE] Redis timeout detected, will reconnect');
+      return true;
     }
     
     const targetError = 'READONLY';
@@ -42,7 +49,6 @@ export const redisConnection = new Redis(redisUrl, {
   connectTimeout: 10000,
   commandTimeout: 5000,
   enableOfflineQueue: true,
-  connectionName: null, // Disable client name setting
 } as any);
 
 // Add connection event handlers
@@ -75,6 +81,7 @@ export function getScrapeQueue(): Queue<any> {
       connection: redisConnection,
       prefix: 'bull', // Simplified prefix without curly braces
       skipLockDuringDisconnection: true,
+      // Simplified options
       defaultJobOptions: {
         removeOnComplete: {
           age: 90000, // 25 hours
