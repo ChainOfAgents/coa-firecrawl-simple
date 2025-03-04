@@ -103,7 +103,6 @@ export const redisRateLimitClient = new Redis(redisRateLimitUrl, {
   },
   connectTimeout: 10000,
   commandTimeout: 5000,
-  connectionName: null, // Disable client name setting to avoid 'CLIENT SETNAME' command
 });
 
 // Add connection event handlers

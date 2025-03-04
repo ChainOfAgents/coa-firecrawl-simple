@@ -15,7 +15,6 @@ const redisRateLimitClient = new Redis(redisRateLimitUrl, {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
   autoResubscribe: true,
-  connectionName: null, // Disable client name setting to avoid 'CLIENT SETNAME' command
   retryStrategy(times) {
     const delay = Math.min(times * 200, 2000);
     Logger.info(`[RATE-LIMITER] Retrying connection after ${delay}ms (attempt ${times})`);

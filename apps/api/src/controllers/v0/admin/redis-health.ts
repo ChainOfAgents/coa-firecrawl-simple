@@ -27,7 +27,6 @@ export async function redisHealthController(req: Request, res: Response) {
     const queueRedis = new Redis(redisUrl, {
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
-      connectionName: null, // Disable client naming to avoid CLIENT SETNAME command
       retryStrategy(times) {
         const delay = Math.min(times * 200, 2000);
         return delay;
