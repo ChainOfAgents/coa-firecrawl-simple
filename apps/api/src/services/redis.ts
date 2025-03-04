@@ -10,53 +10,63 @@ if (!redisRateLimitUrl) {
 
 Logger.info(`[RATE-LIMITER] Using Redis URL from environment: ${redisRateLimitUrl}`);
 
-// Initialize Redis client for rate limiting
-const redisRateLimitClient = new Redis(redisRateLimitUrl);
+// Initialize Redis client for rate limiting with robust connection settings
+const redisRateLimitClient = new Redis(redisRateLimitUrl, {
+  maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+  autoResubscribe: true,
+  retryStrategy(times) {
+    const delay = Math.min(times * 200, 2000);
+    Logger.info(`[RATE-LIMITER] Retrying connection after ${delay}ms (attempt ${times})`);
+    return delay;
+  },
+  reconnectOnError(err) {
+    Logger.error(`[RATE-LIMITER] Error during connection: ${err.message}`);
+    const targetError = 'READONLY';
+    if (err.message.includes(targetError)) {
+      return true;
+    }
+    return false;
+  },
+  connectTimeout: 10000,
+  commandTimeout: 5000,
+});
 
 // Listen to 'error' events to the Redis connection
 redisRateLimitClient.on("error", (error) => {
   try {
     if (error.message === "ECONNRESET") {
-      Logger.error("Connection to Redis Session Rate Limit Store timed out.");
+      Logger.error("[RATE-LIMITER] Connection to Redis Session Rate Limit Store timed out.");
     } else if (error.message === "ECONNREFUSED") {
-      Logger.error("Connection to Redis Session Rate Limit Store refused!");
-    } else Logger.error(error);
-  } catch (error) {}
+      Logger.error("[RATE-LIMITER] Connection to Redis Session Rate Limit Store refused!");
+    } else Logger.error(`[RATE-LIMITER] Redis error: ${error.message}`);
+  } catch (error) {
+    Logger.error(`[RATE-LIMITER] Error handling Redis error: ${error}`);
+  }
 });
 
 // Listen to 'reconnecting' event to Redis
-redisRateLimitClient.on("reconnecting", (err) => {
+redisRateLimitClient.on("reconnecting", () => {
   try {
     if (redisRateLimitClient.status === "reconnecting")
-      Logger.info("Reconnecting to Redis Session Rate Limit Store...");
-    else Logger.error("Error reconnecting to Redis Session Rate Limit Store.");
-  } catch (error) {}
+      Logger.info("[RATE-LIMITER] Reconnecting to Redis Session Rate Limit Store...");
+    else Logger.error("[RATE-LIMITER] Error reconnecting to Redis Session Rate Limit Store.");
+  } catch (error) {
+    Logger.error(`[RATE-LIMITER] Error handling reconnection: ${error}`);
+  }
 });
 
 // Listen to the 'connect' event to Redis
-redisRateLimitClient.on("connect", (err) => {
+redisRateLimitClient.on("connect", () => {
   try {
-    if (!err) Logger.info("Connected to Redis Session Rate Limit Store!");
-  } catch (error) {}
-});
-
-// Add connection event handlers
-redisRateLimitClient.on('connect', () => {
-  Logger.info(`[RATE-LIMITER] Redis client connected successfully to: ${redisRateLimitUrl}`);
-});
-
-redisRateLimitClient.on('error', (err) => {
-  Logger.error(`[RATE-LIMITER] Redis client error: ${err.message}`);
-  // Debug full error
-  Logger.error(`[RATE-LIMITER] Full error: ${JSON.stringify(err)}`);
+    Logger.info("[RATE-LIMITER] Connected to Redis Session Rate Limit Store!");
+  } catch (error) {
+    Logger.error(`[RATE-LIMITER] Error handling connect event: ${error}`);
+  }
 });
 
 redisRateLimitClient.on('ready', () => {
   Logger.info(`[RATE-LIMITER] Redis client ready`);
-});
-
-redisRateLimitClient.on('reconnecting', () => {
-  Logger.info(`[RATE-LIMITER] Redis client reconnecting`);
 });
 
 /**
@@ -66,10 +76,15 @@ redisRateLimitClient.on('reconnecting', () => {
  * @param {number} [expire] Optional expiration time in seconds.
  */
 const setValue = async (key: string, value: string, expire?: number) => {
-  if (expire) {
-    await redisRateLimitClient.set(key, value, "EX", expire);
-  } else {
-    await redisRateLimitClient.set(key, value);
+  try {
+    if (expire) {
+      await redisRateLimitClient.set(key, value, "EX", expire);
+    } else {
+      await redisRateLimitClient.set(key, value);
+    }
+  } catch (error) {
+    Logger.error(`[RATE-LIMITER] Error setting value: ${error.message}`);
+    throw error;
   }
 };
 
@@ -79,8 +94,13 @@ const setValue = async (key: string, value: string, expire?: number) => {
  * @returns {Promise<string|null>} The value, if found, otherwise null.
  */
 const getValue = async (key: string): Promise<string | null> => {
-  const value = await redisRateLimitClient.get(key);
-  return value;
+  try {
+    const value = await redisRateLimitClient.get(key);
+    return value;
+  } catch (error) {
+    Logger.error(`[RATE-LIMITER] Error getting value: ${error.message}`);
+    throw error;
+  }
 };
 
 /**
@@ -88,7 +108,12 @@ const getValue = async (key: string): Promise<string | null> => {
  * @param {string} key The key to delete.
  */
 const deleteKey = async (key: string) => {
-  await redisRateLimitClient.del(key);
+  try {
+    await redisRateLimitClient.del(key);
+  } catch (error) {
+    Logger.error(`[RATE-LIMITER] Error deleting key: ${error.message}`);
+    throw error;
+  }
 };
 
 export { setValue, getValue, deleteKey };

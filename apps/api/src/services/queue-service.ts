@@ -13,37 +13,52 @@ if (!redisUrl) {
 
 Logger.info(`[QUEUE-SERVICE] Using Redis URL from environment: ${redisUrl}`);
 
-// Initialize the Redis connection for BullMQ
+// Initialize the Redis connection for BullMQ with robust connection settings
 export const redisConnection = new Redis(redisUrl, {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
   autoResubscribe: true,
+  retryStrategy(times) {
+    const delay = Math.min(times * 200, 2000);
+    Logger.info(`[QUEUE-SERVICE] Retrying connection after ${delay}ms (attempt ${times})`);
+    return delay;
+  },
+  reconnectOnError(err) {
+    Logger.error(`[QUEUE-SERVICE] Error during connection: ${err.message}`);
+    const targetError = 'READONLY';
+    if (err.message.includes(targetError)) {
+      return true;
+    }
+    return false;
+  },
+  connectTimeout: 10000,
+  commandTimeout: 5000,
 });
 
 // Add connection event handlers
 redisConnection.on('connect', () => {
-  Logger.info(`Redis client connected successfully to: ${redisUrl}`);
+  Logger.info(`[QUEUE-SERVICE] Redis client connected successfully to: ${redisUrl}`);
 });
 
 redisConnection.on('error', (err) => {
-  Logger.error(`Redis client error: ${err.message}`);
+  Logger.error(`[QUEUE-SERVICE] Redis client error: ${err.message}`);
   // Debug full error
-  Logger.error(`Full error: ${JSON.stringify(err)}`);
+  Logger.error(`[QUEUE-SERVICE] Full error: ${JSON.stringify(err)}`);
 });
 
 redisConnection.on('ready', () => {
-  Logger.info(`Redis client ready`);
+  Logger.info(`[QUEUE-SERVICE] Redis client ready`);
 });
 
 redisConnection.on('reconnecting', () => {
-  Logger.info(`Redis client reconnecting`);
+  Logger.info(`[QUEUE-SERVICE] Redis client reconnecting`);
 });
 
 export const scrapeQueueName = "{scrapeQueue}";
 
 export function getScrapeQueue(): Queue<any> {
   if (!scrapeQueue) {
-    Logger.info(`Creating scrapeQueue with Redis connection`);
+    Logger.info(`[QUEUE-SERVICE] Creating scrapeQueue with Redis connection`);
     scrapeQueue = new Queue(scrapeQueueName, {
       connection: redisConnection,
       defaultJobOptions: {
@@ -53,9 +68,14 @@ export function getScrapeQueue(): Queue<any> {
         removeOnFail: {
           age: 90000, // 25 hours
         },
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 1000,
+        },
       },
     });
-    Logger.info("Web scraper queue created successfully");
+    Logger.info("[QUEUE-SERVICE] Web scraper queue created successfully");
   }
   return scrapeQueue;
 }

@@ -52,20 +52,23 @@ const server = app.listen(Number(port), host, () => {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const jobLockExtendInterval =
-  Number(process.env.JOB_LOCK_EXTEND_INTERVAL) || 15000;
-const jobLockExtensionTime =
-  Number(process.env.JOB_LOCK_EXTENSION_TIME) || 60000;
+// Increase intervals to reduce Redis pressure
+const jobLockExtendInterval = Number(process.env.JOB_LOCK_EXTEND_INTERVAL) || 30000; // 30s
+const jobLockExtensionTime = Number(process.env.JOB_LOCK_EXTENSION_TIME) || 120000; // 2m
 
-const cantAcceptConnectionInterval =
-  Number(process.env.CANT_ACCEPT_CONNECTION_INTERVAL) || 2000;
-const connectionMonitorInterval =
-  Number(process.env.CONNECTION_MONITOR_INTERVAL) || 10;
-const gotJobInterval = Number(process.env.CONNECTION_MONITOR_INTERVAL) || 20;
+// Increase polling intervals
+const cantAcceptConnectionInterval = Number(process.env.CANT_ACCEPT_CONNECTION_INTERVAL) || 5000; // 5s
+const connectionMonitorInterval = Number(process.env.CONNECTION_MONITOR_INTERVAL) || 1000; // 1s
+const gotJobInterval = Number(process.env.GOT_JOB_INTERVAL) || 2000; // 2s
 
-// Get environment variables for resource thresholds with much higher defaults
-const MAX_CPU = Number(process.env.MAX_CPU) || 0.95; // 95% CPU usage threshold
-const MAX_RAM = Number(process.env.MAX_RAM) || 0.95; // 95% RAM usage threshold
+// Resource thresholds
+const MAX_CPU = Number(process.env.MAX_CPU) || 0.95;
+const MAX_RAM = Number(process.env.MAX_RAM) || 0.95;
+
+// Maximum number of consecutive empty queue polls before increasing interval
+const MAX_EMPTY_POLLS = 5;
+// Base polling interval when queue is empty (in ms)
+const BASE_EMPTY_INTERVAL = 1000;
 
 export async function processJobInternal(token: string, job: Job) {
   Logger.info(`🔄 [Job ${job.id}] Starting job processing`);
@@ -308,10 +311,13 @@ const workerFun = async (
 ) => {
   Logger.info(`🔄 Starting worker for queue: ${queueName}`);
   
-  // For testing - use hardcoded Redis URL
-  const hardcodedRedisURL = 'redis://10.155.240.35:6379';
-  Logger.info(`🔄 [HARDCODED] Using Redis URL: ${hardcodedRedisURL}`);
-  Logger.info(`🔄 Original env REDIS_URL value was: ${process.env.REDIS_URL || 'not set'}`);
+  // Use environment variable for Redis URL
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) {
+    Logger.error('🔄 REDIS_URL environment variable is not set');
+    throw new Error('REDIS_URL environment variable is required');
+  }
+  Logger.info(`🔄 Using Redis URL from environment: ${redisUrl}`);
   
   try {
     // Test Redis connection
@@ -319,13 +325,14 @@ const workerFun = async (
     Logger.info(`🔄 Redis connection test: ${pingResponse}`);
   } catch (error) {
     Logger.error(`🔄 Redis connection test failed: ${error.message}`);
+    throw error; // Don't continue if we can't connect to Redis
   }
   
   const worker = new Worker(queueName, null, {
     connection: redisConnection,
-    lockDuration: 1 * 60 * 1000,
-    stalledInterval: 30 * 1000,
-    maxStalledCount: 10,
+    lockDuration: jobLockExtensionTime,
+    stalledInterval: 60000, // 1 minute
+    maxStalledCount: 1, // Only retry once before considering job stalled
   });
 
   worker.on('error', err => {
@@ -347,12 +354,14 @@ const workerFun = async (
   Logger.info(`🔄 System resource monitor initialized`);
 
   let attemptCount = 0;
+  let emptyQueueCount = 0;
   
   while (true) {
     if (isShuttingDown) {
-      console.log("No longer accepting new jobs. SIGINT");
+      Logger.info("No longer accepting new jobs. SIGINT received.");
       break;
     }
+
     const token = uuidv4();
     const canAcceptConnection = await monitor.acceptConnection();
     
@@ -367,27 +376,29 @@ const workerFun = async (
       const job = await worker.getNextJob(token);
       
       if (job) {
-        Logger.info(`🔄 Got job ${job.id} from queue. Data: ${JSON.stringify({
-          url: job.data.url,
-          mode: job.data.mode,
-          team_id: job.data.team_id,
-          jobId: job.id,
-          priority: job.opts.priority
-        })}`);
+        emptyQueueCount = 0; // Reset empty queue counter
+        Logger.info(`🔄 Got job ${job.id}. Mode: ${job.data.mode}, Team: ${job.data.team_id}`);
         
         processJobInternal(token, job);
         Logger.debug(`🔄 Job ${job.id} processing started`);
         await sleep(gotJobInterval);
       } else {
-        // Only log every 10 attempts to reduce log noise
-        if (attemptCount % 10 === 0) {
-          Logger.debug(`🔄 No jobs available in queue ${queueName} after ${attemptCount} attempts`);
+        emptyQueueCount++;
+        // Calculate exponential backoff interval
+        const backoffInterval = Math.min(
+          BASE_EMPTY_INTERVAL * Math.pow(2, Math.floor(emptyQueueCount / MAX_EMPTY_POLLS)),
+          30000 // Max 30 second interval
+        );
+        
+        // Only log every MAX_EMPTY_POLLS attempts
+        if (emptyQueueCount % MAX_EMPTY_POLLS === 0) {
+          Logger.debug(`🔄 No jobs available after ${emptyQueueCount} attempts. Waiting ${backoffInterval}ms`);
         }
-        await sleep(connectionMonitorInterval);
+        await sleep(backoffInterval);
       }
     } catch (error) {
       Logger.error(`🔄 Error getting next job: ${error.message}`);
-      await sleep(connectionMonitorInterval);
+      await sleep(connectionMonitorInterval * 2); // Double the interval on error
     }
   }
 };

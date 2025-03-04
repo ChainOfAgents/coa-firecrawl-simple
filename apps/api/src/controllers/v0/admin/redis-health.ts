@@ -17,12 +17,28 @@ export async function redisHealthController(req: Request, res: Response) {
   };
 
   try {
-    // For testing - use hardcoded Redis URL
-    const hardcodedRedisURL = 'redis://10.155.240.35:6379';
-    Logger.info(`[REDIS-HEALTH] [HARDCODED] Using Redis URL: ${hardcodedRedisURL}`);
-    Logger.info(`[REDIS-HEALTH] Original env REDIS_URL value was: ${process.env.REDIS_URL || 'not set'}`);
+    // Use Redis URL from environment
+    const redisUrl = process.env.REDIS_URL;
+    if (!redisUrl) {
+      throw new Error('REDIS_URL environment variable is not set');
+    }
+    Logger.info(`[REDIS-HEALTH] Using Redis URL from environment`);
     
-    const queueRedis = new Redis(hardcodedRedisURL);
+    const queueRedis = new Redis(redisUrl, {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      retryStrategy(times) {
+        const delay = Math.min(times * 200, 2000);
+        return delay;
+      },
+      reconnectOnError(err) {
+        const targetError = 'READONLY';
+        if (err.message.includes(targetError)) {
+          return true;
+        }
+        return false;
+      }
+    });
 
     const testKey = "test";
     const testValue = "test";
@@ -34,7 +50,7 @@ export async function redisHealthController(req: Request, res: Response) {
       queueRedisHealth = await retryOperation(() => queueRedis.get(testKey));
       await retryOperation(() => queueRedis.del(testKey));
     } catch (error) {
-      Logger.error(`queueRedis health check failed: ${error}`);
+      Logger.error(`[REDIS-HEALTH] queueRedis health check failed: ${error}`);
       queueRedisHealth = null;
     }
 
@@ -47,7 +63,7 @@ export async function redisHealthController(req: Request, res: Response) {
       );
       await retryOperation(() => redisRateLimitClient.del(testKey));
     } catch (error) {
-      Logger.error(`redisRateLimitClient health check failed: ${error}`);
+      Logger.error(`[REDIS-HEALTH] redisRateLimitClient health check failed: ${error}`);
       redisRateLimitHealth = null;
     }
 
@@ -61,18 +77,18 @@ export async function redisHealthController(req: Request, res: Response) {
       healthStatus.queueRedis === "healthy" &&
       healthStatus.redisRateLimitClient === "healthy"
     ) {
-      Logger.info("Both Redis instances are healthy");
+      Logger.info("[REDIS-HEALTH] Both Redis instances are healthy");
       return res.status(200).json({ status: "healthy", details: healthStatus });
     } else {
       Logger.info(
-        `Redis instances health check: ${JSON.stringify(healthStatus)}`
+        `[REDIS-HEALTH] Redis instances health check: ${JSON.stringify(healthStatus)}`
       );
       return res
         .status(500)
         .json({ status: "unhealthy", details: healthStatus });
     }
   } catch (error) {
-    Logger.error(`Redis health check failed: ${error}`);
+    Logger.error(`[REDIS-HEALTH] Redis health check failed: ${error}`);
     return res
       .status(500)
       .json({ status: "unhealthy", message: error.message });
@@ -121,7 +137,7 @@ export async function checkRedisContent(req: Request, res: Response) {
       sampleContent: results
     });
   } catch (error) {
-    console.error('Error checking Redis content:', error);
+    console.error('[REDIS-HEALTH] Error checking Redis content:', error);
     return res.status(500).json({
       success: false,
       message: 'Error checking Redis content',

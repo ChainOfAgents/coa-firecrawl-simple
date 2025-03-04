@@ -1,6 +1,7 @@
 import { RateLimiterRedis } from "rate-limiter-flexible";
 import { RateLimiterMode } from "../../src/types";
 import Redis from "ioredis";
+import { Logger } from "../lib/logger";
 
 const RATE_LIMITS = {
   crawl: {
@@ -73,14 +74,53 @@ const RATE_LIMITS = {
   },
 };
 
-// For testing - use hardcoded Redis URL
-const hardcodedRedisURL = 'redis://10.155.240.35:6379';
-console.log(`[RATE-LIMITER] [HARDCODED] Using Redis URL: ${hardcodedRedisURL}`);
-console.log(`[RATE-LIMITER] Original env REDIS_RATE_LIMIT_URL value was: ${process.env.REDIS_RATE_LIMIT_URL || 'not set'}`);
+// Use Redis URL from environment
+const redisRateLimitUrl = process.env.REDIS_RATE_LIMIT_URL;
+if (!redisRateLimitUrl) {
+  Logger.error('[RATE-LIMITER] REDIS_RATE_LIMIT_URL environment variable is not set');
+  throw new Error('REDIS_RATE_LIMIT_URL environment variable is required');
+}
 
-export const redisRateLimitClient = new Redis(
-  hardcodedRedisURL
-)
+Logger.info(`[RATE-LIMITER] Using Redis URL from environment`);
+
+// Initialize Redis client with robust configuration
+export const redisRateLimitClient = new Redis(redisRateLimitUrl, {
+  maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+  autoResubscribe: true,
+  retryStrategy(times) {
+    const delay = Math.min(times * 200, 2000);
+    Logger.info(`[RATE-LIMITER] Retrying connection after ${delay}ms (attempt ${times})`);
+    return delay;
+  },
+  reconnectOnError(err) {
+    Logger.error(`[RATE-LIMITER] Error during connection: ${err.message}`);
+    const targetError = 'READONLY';
+    if (err.message.includes(targetError)) {
+      return true;
+    }
+    return false;
+  },
+  connectTimeout: 10000,
+  commandTimeout: 5000,
+});
+
+// Add connection event handlers
+redisRateLimitClient.on('connect', () => {
+  Logger.info(`[RATE-LIMITER] Redis client connected successfully`);
+});
+
+redisRateLimitClient.on('error', (err) => {
+  Logger.error(`[RATE-LIMITER] Redis client error: ${err.message}`);
+});
+
+redisRateLimitClient.on('ready', () => {
+  Logger.info(`[RATE-LIMITER] Redis client ready`);
+});
+
+redisRateLimitClient.on('reconnecting', () => {
+  Logger.info(`[RATE-LIMITER] Redis client reconnecting`);
+});
 
 const createRateLimiter = (keyPrefix, points) =>
   new RateLimiterRedis({
@@ -116,7 +156,6 @@ export const manualRateLimiter = new RateLimiterRedis({
   duration: 60, // Duration in seconds
 });
 
-
 export const scrapeStatusRateLimiter = new RateLimiterRedis({
   storeClient: redisRateLimitClient,
   keyPrefix: "scrape-status",
@@ -147,13 +186,12 @@ export function getRateLimiter(
     return manualRateLimiter;
   }
 
-  const rateLimitConfig = RATE_LIMITS[mode]; // {default : 5}
+  const rateLimitConfig = RATE_LIMITS[mode];
 
   if (!rateLimitConfig) return serverRateLimiter;
 
-  const planKey = plan ? plan.replace("-", "") : "default"; // "default"
-  const points =
-    rateLimitConfig[planKey] || rateLimitConfig.default || rateLimitConfig; // 5
+  const planKey = plan ? plan.replace("-", "") : "default";
+  const points = rateLimitConfig[planKey] || rateLimitConfig.default || rateLimitConfig;
 
   return createRateLimiter(`${mode}-${planKey}`, points);
 }
