@@ -48,8 +48,7 @@ export const redisConnection = new Redis(redisUrl, {
   },
   connectTimeout: 10000,
   commandTimeout: 5000,
-  enableOfflineQueue: true,
-} as any);
+});
 
 // Add connection event handlers
 redisConnection.on('connect', () => {
@@ -70,18 +69,19 @@ redisConnection.on('reconnecting', () => {
   Logger.debug(`[QUEUE-SERVICE] Redis client reconnecting`);
 });
 
-export const scrapeQueueName = "scrapeQueue"; // Changed from {scrapeQueue} to avoid prefix issues
+export const scrapeQueueName = "{scrapeQueue}";
 
 export function getScrapeQueue(): Queue<any> {
   if (!scrapeQueue) {
     Logger.info(`[QUEUE-SERVICE] Creating scrapeQueue with Redis connection`);
-
-    // Add additional options for BullMQ to handle Redis compatibility issues
-    const bullMQOptions = {
+    scrapeQueue = new Queue(scrapeQueueName, {
       connection: redisConnection,
-      prefix: 'bull', // Simplified prefix without curly braces
-      skipLockDuringDisconnection: true,
-      // Simplified options
+      // Add a custom client factory to reuse the existing connection
+      // This prevents BullMQ from creating new connections that might use setname
+      createClient: (type) => {
+        Logger.debug(`[QUEUE-SERVICE] Using existing Redis connection for client type: ${type}`);
+        return redisConnection;
+      },
       defaultJobOptions: {
         removeOnComplete: {
           age: 90000, // 25 hours
@@ -95,27 +95,8 @@ export function getScrapeQueue(): Queue<any> {
           delay: 1000,
         },
       },
-    };
-
-    try {
-      scrapeQueue = new Queue(scrapeQueueName, bullMQOptions);
-      Logger.info("[QUEUE-SERVICE] Web scraper queue created successfully");
-    } catch (err) {
-      Logger.error(`[QUEUE-SERVICE] Failed to create queue: ${err.message}`);
-      Logger.error(`[QUEUE-SERVICE] Stack trace: ${err.stack}`);
-      
-      // If we get a specific Redis error, try a different approach
-      if (err.message.includes('unknown command') || err.message.includes('ERR unknown command')) {
-        Logger.info("[QUEUE-SERVICE] Attempting to create queue with alternative configuration");
-        // Try with even more basic configuration
-        bullMQOptions.prefix = 'bull'; // Use a very simple prefix
-        scrapeQueue = new Queue(scrapeQueueName, bullMQOptions);
-        Logger.info("[QUEUE-SERVICE] Web scraper queue created with alternative configuration");
-      } else {
-        // Re-throw any other errors
-        throw err;
-      }
-    }
+    });
+    Logger.info("[QUEUE-SERVICE] Web scraper queue created successfully");
   }
   return scrapeQueue;
 }

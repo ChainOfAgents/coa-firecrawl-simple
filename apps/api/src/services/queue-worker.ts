@@ -366,6 +366,10 @@ const workerFun = async (
     },
     {
       connection: redisConnection,
+      createClient: (type) => {
+        Logger.debug(`[QUEUE-WORKER] Using existing Redis connection for client type: ${type}`);
+        return redisConnection;
+      },
       concurrency: 2,
       stalledInterval: 300000, // 5 minutes
       lockDuration: jobLockExtensionTime, // Match the lock extension time
