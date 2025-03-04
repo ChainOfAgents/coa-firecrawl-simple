@@ -38,6 +38,8 @@ export const redisConnection = new Redis(redisUrl, {
   showFriendlyErrorStack: true,
   // Disable client name setting which is not supported on GCP Redis
   enableAutoPipelining: false,
+  namePrefix: '', // Disable client name setting
+  keyPrefix: '', // Disable key prefix
 });
 
 // Add connection event handlers
@@ -59,7 +61,7 @@ redisConnection.on('reconnecting', () => {
   Logger.debug(`[QUEUE-SERVICE] Redis client reconnecting`);
 });
 
-export const scrapeQueueName = "{scrapeQueue}";
+export const scrapeQueueName = "scrapeQueue"; // Fixed queue name without curly braces
 
 export function getScrapeQueue(): Queue<any> {
   if (!scrapeQueue) {
