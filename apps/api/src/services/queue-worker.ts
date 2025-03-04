@@ -326,12 +326,24 @@ const workerFun = async (
     throw error; // Don't continue if we can't connect to Redis
   }
   
-  const worker = new Worker(queueName, null, {
-    connection: redisConnection,
-    lockDuration: jobLockExtensionTime,
-    stalledInterval: 60000, // 1 minute
-    maxStalledCount: 1, // Only retry once before considering job stalled
-  });
+  const worker = new Worker(
+    queueName,
+    async (job) => {
+      const token = uuidv4();
+      return await processJobInternal(token, job);
+    },
+    {
+      connection: redisConnection,
+      createClient: (type) => {
+        Logger.debug(`[QUEUE-WORKER] Creating Redis client for type: ${type}`);
+        return redisConnection;
+      },
+      concurrency: 2,
+      stalledInterval: 300000, // 5 minutes
+      lockDuration: jobLockExtensionTime,
+      lockRenewTime: jobLockExtendInterval,
+    }
+  );
 
   worker.on('error', err => {
     Logger.error(`Worker error: ${err.message}`);
@@ -360,7 +372,6 @@ const workerFun = async (
       break;
     }
 
-    const token = uuidv4();
     const canAcceptConnection = await monitor.acceptConnection();
     
     if (!canAcceptConnection) {
@@ -371,13 +382,13 @@ const workerFun = async (
 
     try {
       Logger.debug(`Attempt #${++attemptCount} to get next job from queue ${queueName}`);
-      const job = await worker.getNextJob(token);
+      const job = await worker.getNextJob(uuidv4());
       
       if (job) {
         emptyQueueCount = 0; // Reset empty queue counter
         Logger.info(`Got job ${job.id}. Mode: ${job.data.mode}, Team: ${job.data.team_id}`);
         
-        processJobInternal(token, job);
+        await processJobInternal(uuidv4(), job);
         Logger.debug(`Job ${job.id} processing started`);
         await sleep(gotJobInterval);
       } else {
