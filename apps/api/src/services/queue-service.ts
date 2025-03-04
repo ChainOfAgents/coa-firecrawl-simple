@@ -25,21 +25,6 @@ export const redisConnection = new Redis(redisUrl, {
   },
   reconnectOnError(err) {
     Logger.error(`[QUEUE-SERVICE] Error during connection: ${err.message}`);
-    Logger.error(`[QUEUE-SERVICE] Stack trace: ${err.stack}`);
-    
-    // For specific errors that might indicate Redis server compatibility issues
-    if (err.message.includes('unknown command') || 
-        err.message.includes('ERR unknown command')) {
-      Logger.error('[QUEUE-SERVICE] Redis compatibility issue detected: your Redis server may not support all commands needed');
-      return true; // Always reconnect for command compatibility issues
-    }
-    
-    // Also reconnect for timeouts
-    if (err.message.includes('timeout') || err.message.includes('timed out')) {
-      Logger.error('[QUEUE-SERVICE] Redis timeout detected, will reconnect');
-      return true;
-    }
-    
     const targetError = 'READONLY';
     if (err.message.includes(targetError)) {
       return true;
