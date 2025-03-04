@@ -28,17 +28,30 @@ export class CloudAuth {
       
       // For production (Cloud Run), use metadata server
       const targetAudience = audience || process.env.PLAYWRIGHT_MICROSERVICE_URL || '';
-      const response = await axios.get(
-        'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=' + 
-        encodeURIComponent(targetAudience),
-        {
-          headers: {
-            'Metadata-Flavor': 'Google'
-          },
-          timeout: 5000
+      
+      try {
+        // Increase timeout to 15 seconds
+        const response = await axios.get(
+          `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=${encodeURIComponent(targetAudience)}`,
+          {
+            headers: {
+              'Metadata-Flavor': 'Google'
+            },
+            timeout: 15000 // Increased timeout from 5000ms to 15000ms
+          }
+        );
+        return response.data;
+      } catch (metadataError) {
+        Logger.error(`Failed to get ID token from metadata server: ${metadataError}`);
+        
+        // If the puppeteer service allows unauthenticated access, we can proceed without a token
+        if (process.env.PLAYWRIGHT_MICROSERVICE_URL) {
+          Logger.warn(`Proceeding without authentication token. This is only acceptable if the puppeteer service allows unauthenticated access.`);
+          return '';
         }
-      );
-      return response.data;
+        
+        throw metadataError;
+      }
     } catch (error) {
       Logger.error(`Failed to get ID token: ${error}`);
       return '';

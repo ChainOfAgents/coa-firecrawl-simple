@@ -20,9 +20,20 @@ export async function scrapeWithPlaywright(
     const reqParams = await generateRequestParams(url);
     const waitParam = reqParams["params"]?.wait ?? waitFor;
 
-    const idToken = await CloudAuth.getIdToken();
+    // Get authentication token
+    let idToken;
+    try {
+      idToken = await CloudAuth.getIdToken();
+    } catch (authError) {
+      Logger.error(`Failed to get authentication token: ${authError.message}`);
+      idToken = null;
+    }
+    // Only add Authorization header if we have a token
     const authHeader = idToken ? { "Authorization": `Bearer ${idToken}` } : {};
-
+    
+    Logger.debug(`Calling puppeteer service for URL: ${url}`);
+    Logger.debug(`Using authentication: ${idToken ? 'Yes' : 'No'}`);
+    
     const response = await axios.post(
       process.env.PLAYWRIGHT_MICROSERVICE_URL,
       {
