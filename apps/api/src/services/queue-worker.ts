@@ -370,7 +370,6 @@ const workerFun = async (
       stalledInterval: 300000, // 5 minutes
       lockDuration: jobLockExtensionTime, // Match the lock extension time
       lockRenewTime: jobLockExtendInterval, // Match the lock extend interval
-      skipLockRenewalIfNotExists: true, // Skip lock renewal if job has been removed
       settings: {
         backoffStrategy: (attemptsMade, err) => {
           // Exponential backoff with jitter
@@ -385,7 +384,6 @@ const workerFun = async (
           Logger.debug(`Backoff delay for attempt ${attemptsMade}: ${delay}ms`);
           return delay;
         },
-        drainDelay: 5000, // 5 seconds wait between queue drain checks
       },
     },
   );
@@ -397,7 +395,7 @@ const workerFun = async (
       name: err.name,
       message: err.message,
       stack: err.stack,
-      cause: err.cause ? JSON.stringify(err.cause) : undefined
+      cause: err?.cause ? String(err.cause) : undefined
     }, null, 2)}`);
   });
 

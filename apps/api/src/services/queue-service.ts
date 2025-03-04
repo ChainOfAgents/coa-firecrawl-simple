@@ -42,10 +42,8 @@ export const redisConnection = new Redis(redisUrl, {
   connectTimeout: 10000,
   commandTimeout: 5000,
   enableOfflineQueue: true,
-  maxScriptsCachingSize: 100,
-  // Use this option only for Redis servers with limited command support
   connectionName: null, // Disable client name setting
-});
+} as any);
 
 // Add connection event handlers
 redisConnection.on('connect', () => {

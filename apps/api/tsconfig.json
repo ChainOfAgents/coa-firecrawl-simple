@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "rootDir": "./src",
-    "lib": ["es6","DOM"],
+    "lib": ["es2022","DOM"],
 
     // or higher
     "target": "ES2020",
