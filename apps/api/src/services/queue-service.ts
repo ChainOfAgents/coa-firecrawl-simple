@@ -65,13 +65,7 @@ export function getScrapeQueue(): Queue<any> {
   if (!scrapeQueue) {
     Logger.info(`[QUEUE-SERVICE] Creating scrapeQueue with Redis connection`);
     scrapeQueue = new Queue(scrapeQueueName, {
-      connection: {
-        ...redisConnection.options,
-        maxRetriesPerRequest: null,
-        enableReadyCheck: false,
-        connectTimeout: 30000,
-        commandTimeout: 30000,
-      },
+      connection: redisConnection,
       defaultJobOptions: {
         removeOnComplete: {
           age: 90000, // 25 hours

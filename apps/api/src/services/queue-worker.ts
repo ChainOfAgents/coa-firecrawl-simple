@@ -333,13 +333,7 @@ const workerFun = async (
       return await processJobInternal(token, job);
     },
     {
-      connection: {
-        ...redisConnection.options,
-        maxRetriesPerRequest: null,
-        enableReadyCheck: false,
-        connectTimeout: 30000,
-        commandTimeout: 30000,
-      },
+      connection: redisConnection,
       concurrency: 2
     }
   );
