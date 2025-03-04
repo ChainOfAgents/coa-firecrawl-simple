@@ -68,11 +68,6 @@ class SystemMonitor {
         const cpuUsage = await this.checkCpuUsage();
         const memoryUsage = await this.checkMemoryUsage();
 
-        // Debug logging to help diagnose resource issues
-        if (process.env.LOGGING_LEVEL === 'DEBUG') {
-            console.log(`DEBUG: CPU usage: ${(cpuUsage * 100).toFixed(2)}%, Memory usage: ${(memoryUsage * 100).toFixed(2)}%, Thresholds - CPU: ${(MAX_CPU * 100).toFixed(2)}%, RAM: ${(MAX_RAM * 100).toFixed(2)}%`);
-        }
-
         return cpuUsage < MAX_CPU && memoryUsage < MAX_RAM;
     }
 
