@@ -13,7 +13,7 @@ if (!redisUrl) {
 
 Logger.debug(`[QUEUE-SERVICE] Using Redis URL from environment: ${redisUrl}`);
 
-// Initialize the Redis connection for BullMQ with robust connection settings
+// Initialize the Redis connection for BullMQ with GCP-compatible settings
 export const redisConnection = new Redis(redisUrl, {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
@@ -33,6 +33,11 @@ export const redisConnection = new Redis(redisUrl, {
   },
   connectTimeout: 10000,
   commandTimeout: 5000,
+  // Add GCP-specific settings
+  enableOfflineQueue: true,
+  showFriendlyErrorStack: true,
+  // Disable client name setting which is not supported on GCP Redis
+  enableAutoPipelining: false,
 });
 
 // Add connection event handlers
@@ -74,6 +79,12 @@ export function getScrapeQueue(): Queue<any> {
           delay: 1000,
         },
       },
+      // Add GCP-specific settings
+      settings: {
+        lockDuration: 30000,
+        stalledInterval: 30000,
+        maxStalledCount: 1,
+      }
     });
     Logger.info("[QUEUE-SERVICE] Web scraper queue created successfully");
   }

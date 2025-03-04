@@ -338,6 +338,12 @@ const workerFun = async (
       stalledInterval: 300000, // 5 minutes
       lockDuration: jobLockExtensionTime,
       lockRenewTime: jobLockExtendInterval,
+      // Add GCP-specific settings
+      settings: {
+        lockDuration: 30000,
+        stalledInterval: 30000,
+        maxStalledCount: 1,
+      }
     }
   );
 
