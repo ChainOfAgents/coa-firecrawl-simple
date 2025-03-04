@@ -76,12 +76,6 @@ export function getScrapeQueue(): Queue<any> {
     Logger.info(`[QUEUE-SERVICE] Creating scrapeQueue with Redis connection`);
     scrapeQueue = new Queue(scrapeQueueName, {
       connection: redisConnection,
-      // Add a custom client factory to reuse the existing connection
-      // This prevents BullMQ from creating new connections that might use setname
-      createClient: (type) => {
-        Logger.debug(`[QUEUE-SERVICE] Using existing Redis connection for client type: ${type}`);
-        return redisConnection;
-      },
       defaultJobOptions: {
         removeOnComplete: {
           age: 90000, // 25 hours
