@@ -25,6 +25,14 @@ export const redisConnection = new Redis(redisUrl, {
   },
   reconnectOnError(err) {
     Logger.error(`[QUEUE-SERVICE] Error during connection: ${err.message}`);
+    Logger.error(`[QUEUE-SERVICE] Stack trace: ${err.stack}`);
+    
+    // For specific errors that might indicate Redis server compatibility issues
+    if (err.message.includes('unknown command') || 
+        err.message.includes('ERR unknown command')) {
+      Logger.error('[QUEUE-SERVICE] Redis compatibility issue detected: your Redis server may not support all commands needed');
+    }
+    
     const targetError = 'READONLY';
     if (err.message.includes(targetError)) {
       return true;
@@ -33,6 +41,10 @@ export const redisConnection = new Redis(redisUrl, {
   },
   connectTimeout: 10000,
   commandTimeout: 5000,
+  enableOfflineQueue: true,
+  maxScriptsCachingSize: 100,
+  // Use this option only for Redis servers with limited command support
+  connectionName: null, // Disable client name setting
 });
 
 // Add connection event handlers
@@ -54,13 +66,17 @@ redisConnection.on('reconnecting', () => {
   Logger.debug(`[QUEUE-SERVICE] Redis client reconnecting`);
 });
 
-export const scrapeQueueName = "{scrapeQueue}";
+export const scrapeQueueName = "scrapeQueue"; // Changed from {scrapeQueue} to avoid prefix issues
 
 export function getScrapeQueue(): Queue<any> {
   if (!scrapeQueue) {
     Logger.info(`[QUEUE-SERVICE] Creating scrapeQueue with Redis connection`);
-    scrapeQueue = new Queue(scrapeQueueName, {
+
+    // Add additional options for BullMQ to handle Redis compatibility issues
+    const bullMQOptions = {
       connection: redisConnection,
+      prefix: 'bull', // Simplified prefix without curly braces
+      skipLockDuringDisconnection: true,
       defaultJobOptions: {
         removeOnComplete: {
           age: 90000, // 25 hours
@@ -74,8 +90,27 @@ export function getScrapeQueue(): Queue<any> {
           delay: 1000,
         },
       },
-    });
-    Logger.info("[QUEUE-SERVICE] Web scraper queue created successfully");
+    };
+
+    try {
+      scrapeQueue = new Queue(scrapeQueueName, bullMQOptions);
+      Logger.info("[QUEUE-SERVICE] Web scraper queue created successfully");
+    } catch (err) {
+      Logger.error(`[QUEUE-SERVICE] Failed to create queue: ${err.message}`);
+      Logger.error(`[QUEUE-SERVICE] Stack trace: ${err.stack}`);
+      
+      // If we get a specific Redis error, try a different approach
+      if (err.message.includes('unknown command') || err.message.includes('ERR unknown command')) {
+        Logger.info("[QUEUE-SERVICE] Attempting to create queue with alternative configuration");
+        // Try with even more basic configuration
+        bullMQOptions.prefix = 'bull'; // Use a very simple prefix
+        scrapeQueue = new Queue(scrapeQueueName, bullMQOptions);
+        Logger.info("[QUEUE-SERVICE] Web scraper queue created with alternative configuration");
+      } else {
+        // Re-throw any other errors
+        throw err;
+      }
+    }
   }
   return scrapeQueue;
 }

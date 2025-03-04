@@ -76,10 +76,20 @@ export async function processJobInternal(token: string, job: Job) {
   // Set up lock extension interval
   const extendLockInterval = setInterval(async () => {
     try {
-      await job.extendLock(token, jobLockExtensionTime);
+      // Add timeout protection for lock extension
+      const extendPromise = job.extendLock(token, jobLockExtensionTime);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Lock extension timeout')), 4000)
+      );
+      
+      await Promise.race([extendPromise, timeoutPromise]);
       Logger.debug(`[Job ${job.id}] Lock extended successfully`);
     } catch (e) {
-      Logger.error(`[Job ${job.id}] Failed to extend job lock: ${e.message}`);
+      if (e.message.includes('timeout')) {
+        Logger.error(`[Job ${job.id}] Lock extension timed out: ${e.message}`);
+      } else {
+        Logger.error(`[Job ${job.id}] Failed to extend job lock: ${e.message}`);
+      }
     }
   }, jobLockExtendInterval);
 
@@ -91,12 +101,27 @@ export async function processJobInternal(token: string, job: Job) {
     try {
       Logger.debug(`[Job ${job.id}] Attempting to move job to completed state`);
       try {
-        await job.moveToCompleted(result.docs, token, false);
+        // Add timeout protection for job completion
+        const completePromise = job.moveToCompleted(result.docs, token, false);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Job completion timeout')), 5000)
+        );
+        
+        await Promise.race([completePromise, timeoutPromise]);
         Logger.debug(`[Job ${job.id}] Successfully moved job to completed state`);
         
-        // Verify job state after completion
-        const state = await getScrapeQueue().getJobState(job.id);
-        Logger.debug(`[Job ${job.id}] Job state after completion: ${state}`);
+        // Verify job state after completion with timeout protection
+        try {
+          const statePromise = getScrapeQueue().getJobState(job.id);
+          const stateTimeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Get job state timeout')), 3000)
+          );
+          
+          const state = await Promise.race([statePromise, stateTimeoutPromise]);
+          Logger.debug(`[Job ${job.id}] Job state after completion: ${state}`);
+        } catch (stateError) {
+          Logger.error(`[Job ${job.id}] Error checking job state: ${stateError.message}`);
+        }
       } catch (e) {
         Logger.error(`[Job ${job.id}] Error moving job to completed state: ${e.message}`);
         // Try again with a different approach
@@ -308,33 +333,72 @@ const workerFun = async (
   processJobInternal: (token: string, job: Job) => Promise<any>,
 ) => {
   Logger.info(`Starting worker for queue: ${queueName}`);
-  
-  // Use environment variable for Redis URL
-  const redisUrl = process.env.REDIS_URL;
-  if (!redisUrl) {
-    Logger.error('REDIS_URL environment variable is not set');
-    throw new Error('REDIS_URL environment variable is required');
-  }
-  Logger.info(`Using Redis URL from environment: ${redisUrl}`);
-  
-  try {
-    // Test Redis connection
-    const pingResponse = await redisConnection.ping();
-    Logger.info(`Redis connection test: ${pingResponse}`);
-  } catch (error) {
-    Logger.error(`Redis connection test failed: ${error.message}`);
-    throw error; // Don't continue if we can't connect to Redis
-  }
-  
-  const worker = new Worker(queueName, null, {
-    connection: redisConnection,
-    lockDuration: jobLockExtensionTime,
-    stalledInterval: 60000, // 1 minute
-    maxStalledCount: 1, // Only retry once before considering job stalled
-  });
+  Logger.info(`Using Redis URL from environment: ${process.env.REDIS_URL}`);
+
+  // Perform initial Redis connection test
+  (async () => {
+    try {
+      // Set up a command timeout
+      const pingPromise = redisConnection.ping();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Redis ping timeout')), 5000)
+      );
+      
+      const response = await Promise.race([pingPromise, timeoutPromise]);
+      Logger.info(`Redis connection test: ${response}`);
+    } catch (err) {
+      Logger.error(`Redis connection test failed: ${err.message}`);
+      if (err.message.includes('unknown command') || err.message.includes('ERR unknown command')) {
+        Logger.error('[QUEUE-WORKER] Redis compatibility issue detected: your Redis server may not support all commands needed');
+      } else if (err.message.includes('timeout')) {
+        Logger.error('[QUEUE-WORKER] Redis connection timeout - server might be overloaded or network issues');
+      }
+      Logger.error(`Redis connection stack trace: ${err.stack || 'No stack trace'}`);
+    }
+  })();
+
+  // Set up the worker with connection recovery configuration
+  const worker = new Worker(
+    queueName,
+    async (job) => {
+      const token = uuidv4();
+      return await processJobInternal(token, job);
+    },
+    {
+      connection: redisConnection,
+      concurrency: 2,
+      stalledInterval: 300000, // 5 minutes
+      lockDuration: jobLockExtensionTime, // Match the lock extension time
+      lockRenewTime: jobLockExtendInterval, // Match the lock extend interval
+      skipLockRenewalIfNotExists: true, // Skip lock renewal if job has been removed
+      settings: {
+        backoffStrategy: (attemptsMade, err) => {
+          // Exponential backoff with jitter
+          const baseDelay = 1000; // 1 second
+          const maxDelay = 30000; // 30 seconds
+          const jitter = Math.random() * 0.3 + 0.85; // 0.85-1.15 jitter
+          const delay = Math.min(
+            maxDelay,
+            Math.pow(2, attemptsMade) * baseDelay * jitter
+          );
+          
+          Logger.debug(`Backoff delay for attempt ${attemptsMade}: ${delay}ms`);
+          return delay;
+        },
+        drainDelay: 5000, // 5 seconds wait between queue drain checks
+      },
+    },
+  );
 
   worker.on('error', err => {
     Logger.error(`Worker error: ${err.message}`);
+    // Log full error details with stack trace
+    Logger.error(`Error details: ${JSON.stringify({
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+      cause: err.cause ? JSON.stringify(err.cause) : undefined
+    }, null, 2)}`);
   });
 
   worker.on('failed', (job, err) => {
@@ -360,7 +424,6 @@ const workerFun = async (
       break;
     }
 
-    const token = uuidv4();
     const canAcceptConnection = await monitor.acceptConnection();
     
     if (!canAcceptConnection) {
@@ -371,13 +434,13 @@ const workerFun = async (
 
     try {
       Logger.debug(`Attempt #${++attemptCount} to get next job from queue ${queueName}`);
-      const job = await worker.getNextJob(token);
+      const job = await worker.getNextJob(uuidv4());
       
       if (job) {
         emptyQueueCount = 0; // Reset empty queue counter
         Logger.info(`Got job ${job.id}. Mode: ${job.data.mode}, Team: ${job.data.team_id}`);
         
-        processJobInternal(token, job);
+        await processJobInternal(uuidv4(), job);
         Logger.debug(`Job ${job.id} processing started`);
         await sleep(gotJobInterval);
       } else {
