@@ -12,6 +12,14 @@ export type StoredCrawl = {
   createdAt: number;
 };
 
+export interface CrawlJob {
+  url: string;
+  jobId: string;
+  status?: string;
+  error?: string;
+  timestamp?: number;
+}
+
 export async function saveCrawl(id: string, crawl: StoredCrawl) {
   await redisConnection.set("crawl:" + id, JSON.stringify(crawl));
   await redisConnection.expire("crawl:" + id, 24 * 60 * 60, "NX");
@@ -97,26 +105,31 @@ export async function finishCrawl(id: string) {
   }
 }
 
-export async function getCrawlJobs(id: string): Promise<string[]> {
-  return await redisConnection.smembers("crawl:" + id + ":jobs");
+export async function getCrawlJobs(crawlId: string): Promise<CrawlJob[]> {
+  const jobIds = await redisConnection.smembers("crawl:" + crawlId + ":jobs");
+  return jobIds.map(jobId => ({
+    jobId,
+    url: '', // Will be populated from job data
+    timestamp: Date.now()
+  }));
 }
 
 export async function lockURL(
-  id: string,
-  sc: StoredCrawl,
   url: string,
+  crawlId: string,
+  sc: StoredCrawl,
 ): Promise<boolean> {
   if (typeof sc.crawlerOptions?.limit === "number") {
     if (
-      (await redisConnection.scard("crawl:" + id + ":visited")) >=
+      (await redisConnection.scard("crawl:" + crawlId + ":visited")) >=
       sc.crawlerOptions.limit
     ) {
       return false;
     }
   }
   const res =
-    (await redisConnection.sadd("crawl:" + id + ":visited", url)) !== 0;
-  await redisConnection.expire("crawl:" + id + ":visited", 24 * 60 * 60, "NX");
+    (await redisConnection.sadd("crawl:" + crawlId + ":visited", url)) !== 0;
+  await redisConnection.expire("crawl:" + crawlId + ":visited", 24 * 60 * 60, "NX");
   return res;
 }
 

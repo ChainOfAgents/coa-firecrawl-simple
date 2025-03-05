@@ -14,6 +14,9 @@ import { getJobPriority } from "../../lib/job-priority";
 import { PlanType } from "../../types";
 import { redisRateLimitClient } from "../../services/rate-limiter";
 
+// Default team ID for system-generated requests
+const DEFAULT_TEAM_ID = 'system';
+
 /**
  * @openapi
  * /v1/scrape:
@@ -68,18 +71,21 @@ export async function scrapeController(
   // Log the request details
   Logger.debug(`Scrape request: url=${req.body.url}, timeout=${timeout}ms, jobId=${jobId}`);
 
+  // Get team_id from auth, defaulting to a system team ID if undefined
+  const team_id = req.auth?.team_id || DEFAULT_TEAM_ID;
+
   const jobPriority = await getJobPriority({
     plan: req.auth.plan as PlanType,
-    team_id: req.auth.team_id,
+    team_id,
     basePriority: 10,
   });
 
-  const job = await addScrapeJobRaw(
+  await addScrapeJobRaw(
     {
       url: req.body.url,
       mode: "single_urls",
       crawlerOptions: {},
-      team_id: req.auth.team_id,
+      team_id, // Use the safely handled team_id
       pageOptions,
       origin: req.body.origin,
       is_scrape: true,
@@ -89,15 +95,15 @@ export async function scrapeController(
     jobPriority
   );
 
-  Logger.debug(`Job ${job.id} added to queue with priority ${jobPriority}`);
+  Logger.debug(`Job ${jobId} added to queue with priority ${jobPriority}`);
 
   let doc: any | undefined;
   try {
     const startTime = Date.now();
-    Logger.debug(`Waiting for job ${job.id} with timeout ${timeout}ms`);
-    doc = (await waitForJob(job.id, timeout))[0];
+    Logger.debug(`Waiting for job ${jobId} with timeout ${timeout}ms`);
+    doc = (await waitForJob(jobId, timeout))[0];
     const duration = Date.now() - startTime;
-    Logger.debug(`Job ${job.id} completed in ${duration}ms`);
+    Logger.debug(`Job ${jobId} completed in ${duration}ms`);
   } catch (e) {
     Logger.error(`Error in scrapeController: ${e}`);
     if (e instanceof Error && e.message.includes("timeout")) {
@@ -113,10 +119,8 @@ export async function scrapeController(
     }
   }
 
-  await job.remove();
-
   if (!doc) {
-    console.error("!!! PANIC DOC IS", doc, job);
+    console.error("!!! PANIC DOC IS", doc, jobId);
     return res.status(200).json({
       success: true,
       warning: "No page found",

@@ -120,9 +120,9 @@ export async function crawlController(req: Request, res: Response) {
         Logger.debug(`Adding job from sitemap for ${x.url}`);
 
         const url = x.url;
-        const uuid = uuidv4();
+        const jobId = uuidv4();
         return {
-          name: uuid,
+          name: jobId,
           data: {
             url,
             mode: "single_urls",
@@ -134,7 +134,7 @@ export async function crawlController(req: Request, res: Response) {
             sitemapped: true,
           },
           opts: {
-            jobId: uuid,
+            jobId: jobId,
             priority: jobPriority,
           },
         };
@@ -151,12 +151,10 @@ export async function crawlController(req: Request, res: Response) {
 
       await getScrapeQueue().addBulk(jobs);
     } else {
-      await lockURL(id, sc, url);
-
-      const job = await addScrapeJobRaw(
+      const jobId = uuidv4();
+      await addScrapeJobRaw(
         {
           url,
-          mode: "single_urls",
           crawlerOptions: crawlerOptions,
           team_id: team_id,
           pageOptions: pageOptions,
@@ -166,10 +164,11 @@ export async function crawlController(req: Request, res: Response) {
         {
           priority: 15, // prioritize request 0 of crawl jobs same as scrape jobs
         },
-        uuidv4(),
+        jobId,
         10
       );
-      await addCrawlJob(id, job.id);
+      await addCrawlJob(id, jobId);
+      await lockURL(url, id, sc);
     }
 
     res.json({ jobId: id });

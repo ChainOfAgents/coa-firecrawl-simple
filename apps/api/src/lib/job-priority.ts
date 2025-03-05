@@ -2,10 +2,15 @@ import { redisConnection } from "../../src/services/queue-service";
 import { PlanType } from "../../src/types";
 import { Logger } from "./logger";
 
+// Default team ID for system-generated requests
+const DEFAULT_TEAM_ID = 'system';
 const SET_KEY_PREFIX = "limit_team_id:";
+
 export async function addJobPriority(team_id, job_id) {
   try {
-    const setKey = SET_KEY_PREFIX + team_id;
+    // Use default team_id if undefined
+    const safeTeamId = team_id || DEFAULT_TEAM_ID;
+    const setKey = SET_KEY_PREFIX + safeTeamId;
 
     // Add scrape job id to the set
     await redisConnection.sadd(setKey, job_id);
@@ -19,7 +24,9 @@ export async function addJobPriority(team_id, job_id) {
 
 export async function deleteJobPriority(team_id, job_id) {
   try {
-    const setKey = SET_KEY_PREFIX + team_id;
+    // Use default team_id if undefined
+    const safeTeamId = team_id || DEFAULT_TEAM_ID;
+    const setKey = SET_KEY_PREFIX + safeTeamId;
 
     // remove job_id from the set
     await redisConnection.srem(setKey, job_id);
@@ -34,11 +41,13 @@ export async function getJobPriority({
   basePriority = 10,
 }: {
   plan: PlanType;
-  team_id: string;
+  team_id?: string; // Make team_id optional
   basePriority?: number;
 }): Promise<number> {
   try {
-    const setKey = SET_KEY_PREFIX + team_id;
+    // Use default team_id if undefined
+    const safeTeamId = team_id || DEFAULT_TEAM_ID;
+    const setKey = SET_KEY_PREFIX + safeTeamId;
 
     // Get the length of the set
     const setLength = await redisConnection.scard(setKey);

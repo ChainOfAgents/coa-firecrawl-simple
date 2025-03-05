@@ -195,27 +195,33 @@ export async function crawlController(
     );
     await getScrapeQueue().addBulk(jobs);
   } else {
-    await lockURL(id, sc, req.body.url);
-    const job = await addScrapeJobRaw(
+    const jobId = uuidv4();
+    await addScrapeJobRaw(
       {
         url: req.body.url,
-        mode: "single_urls",
         crawlerOptions: crawlerOptions,
         team_id: req.auth.team_id,
         pageOptions: pageOptions,
-        webhookUrl: req.body.webhookUrl,
-        webhookMetadata: req.body.webhookMetadata,
         origin: "api",
         crawl_id: id,
-        v1: true,
+        sitemapped: false,
       },
       {
         priority: 15,
       },
-      uuidv4(),
-      10
+      jobId,
+      15
     );
-    await addCrawlJob(id, job.id);
+    await addCrawlJob(id, jobId);
+    await lockURL(req.body.url, id, sc);
+
+    const protocol = process.env.ENV === "local" ? req.protocol : "https";
+
+    return res.status(200).json({
+      success: true,
+      id,
+      url: `${protocol}://${req.get("host")}/v1/crawl/${id}`,
+    });
   }
 
   const protocol = process.env.ENV === "local" ? req.protocol : "https";

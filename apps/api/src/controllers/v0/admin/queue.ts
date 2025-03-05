@@ -1,9 +1,8 @@
 import { Request, Response } from "express";
-
-import { Job } from "bullmq";
 import { Logger } from "../../../lib/logger";
 import { getScrapeQueue } from "../../../services/queue-service";
 import { checkAlerts } from "../../../services/alerts";
+import { QueueJob } from "../../../services/queue/types";
 
 export async function cleanBefore24hCompleteJobsController(
   req: Request,
@@ -14,23 +13,18 @@ export async function cleanBefore24hCompleteJobsController(
     const scrapeQueue = getScrapeQueue();
     const batchSize = 10;
     const numberOfBatches = 9; // Adjust based on your needs
-    const completedJobsPromises: Promise<Job[]>[] = [];
+    const completedJobsPromises: Promise<QueueJob[]>[] = [];
     for (let i = 0; i < numberOfBatches; i++) {
       completedJobsPromises.push(
-        scrapeQueue.getJobs(
-          ["completed"],
-          i * batchSize,
-          i * batchSize + batchSize,
-          true
-        )
+        scrapeQueue.getJobs(["completed"])
       );
     }
-    const completedJobs: Job[] = (
+    const completedJobs: QueueJob[] = (
       await Promise.all(completedJobsPromises)
     ).flat();
     const before24hJobs =
       completedJobs.filter(
-        (job) => job.finishedOn < Date.now() - 24 * 60 * 60 * 1000
+        (job) => job.timestamp < Date.now() - 24 * 60 * 60 * 1000
       ) || [];
 
     let count = 0;
@@ -41,7 +35,7 @@ export async function cleanBefore24hCompleteJobsController(
 
     for (const job of before24hJobs) {
       try {
-        await job.remove();
+        await scrapeQueue.removeJob(job.id);
         count++;
       } catch (jobError) {
         Logger.error(`🐂 Failed to remove job with ID ${job.id}: ${jobError}`);
@@ -75,7 +69,7 @@ export async function queuesController(req: Request, res: Response) {
 
     const noActiveJobs = webScraperActive === 0;
     // 200 if no active jobs, 503 if there are active jobs
-    return res.status(noActiveJobs ? 200 : 500).json({
+    return res.status(noActiveJobs ? 200 : 503).json({
       webScraperActive,
       noActiveJobs,
     });

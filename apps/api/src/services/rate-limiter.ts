@@ -74,101 +74,163 @@ const RATE_LIMITS = {
   },
 };
 
-// Use Redis URL from environment
-const redisRateLimitUrl = process.env.REDIS_RATE_LIMIT_URL;
-if (!redisRateLimitUrl) {
-  Logger.error('[RATE-LIMITER] REDIS_RATE_LIMIT_URL environment variable is not set');
-  throw new Error('REDIS_RATE_LIMIT_URL environment variable is required');
+// Check if we're using Cloud Tasks or Bull
+const isUsingCloudTasks = process.env.QUEUE_PROVIDER === 'cloud-tasks';
+
+// Initialize Redis client only if needed
+export let redisRateLimitClient: Redis = null;
+
+// Skip Redis initialization if using Cloud Tasks
+if (!isUsingCloudTasks) {
+  // Use Redis URL from environment
+  const redisRateLimitUrl = process.env.REDIS_RATE_LIMIT_URL;
+  if (!redisRateLimitUrl) {
+    Logger.error('[RATE-LIMITER] REDIS_RATE_LIMIT_URL environment variable is not set');
+    throw new Error('REDIS_RATE_LIMIT_URL environment variable is required when not using Cloud Tasks');
+  }
+
+  Logger.info(`[RATE-LIMITER] Using Redis URL from environment`);
+
+  // Initialize Redis client with robust configuration
+  const redisOptions = {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+    autoResubscribe: true,
+    retryStrategy(times) {
+      const delay = Math.min(times * 200, 2000);
+      Logger.info(`[RATE-LIMITER] Retrying connection after ${delay}ms (attempt ${times})`);
+      return delay;
+    },
+    reconnectOnError(err) {
+      Logger.error(`[RATE-LIMITER] Error during connection: ${err.message}`);
+      const targetError = 'READONLY';
+      if (err.message.includes(targetError)) {
+        return true;
+      }
+      return false;
+    },
+    connectTimeout: 10000,
+    commandTimeout: 5000,
+    // Add GCP-specific settings
+    enableOfflineQueue: true,
+    showFriendlyErrorStack: true
+  };
+
+  redisRateLimitClient = new Redis(redisRateLimitUrl, {
+    ...redisOptions,
+    // These options aren't in the type definition but are needed for GCP Redis
+    // Disable client name setting which is not supported on GCP Redis
+    enableAutoPipelining: false,
+    disableClientSetname: true, // Prevents 'client setname' command from being sent
+    username: '', // Disable client name setting
+    clientName: '', // Sets an empty client name
+    keyPrefix: '' // Disable key prefix
+  } as any);
+
+  // Add connection event handlers
+  redisRateLimitClient.on('connect', () => {
+    Logger.debug(`[RATE-LIMITER] Redis client connected successfully`);
+  });
+
+  redisRateLimitClient.on('error', (err) => {
+    Logger.error(`[RATE-LIMITER] Redis client error: ${err.message}`);
+  });
+
+  redisRateLimitClient.on('ready', () => {
+    Logger.debug(`[RATE-LIMITER] Redis client ready`);
+  });
+
+  redisRateLimitClient.on('reconnecting', () => {
+    Logger.debug(`[RATE-LIMITER] Redis client reconnecting`);
+  });
+} else {
+  Logger.info('[RATE-LIMITER] Using Cloud Tasks, skipping Redis initialization');
 }
 
-Logger.info(`[RATE-LIMITER] Using Redis URL from environment`);
+// Dummy rate limiter for when Redis is not available (Cloud Tasks mode)
+export class DummyRateLimiter {
+  constructor(options: any) {
+    Logger.info('[RATE-LIMITER] Using dummy rate limiter (Cloud Tasks mode)');
+  }
 
-// Initialize Redis client with robust configuration
-export const redisRateLimitClient = new Redis(redisRateLimitUrl, {
-  maxRetriesPerRequest: null,
-  enableReadyCheck: false,
-  autoResubscribe: true,
-  retryStrategy(times) {
-    const delay = Math.min(times * 200, 2000);
-    Logger.info(`[RATE-LIMITER] Retrying connection after ${delay}ms (attempt ${times})`);
-    return delay;
-  },
-  reconnectOnError(err) {
-    Logger.error(`[RATE-LIMITER] Error during connection: ${err.message}`);
-    const targetError = 'READONLY';
-    if (err.message.includes(targetError)) {
-      return true;
-    }
-    return false;
-  },
-  connectTimeout: 10000,
-  commandTimeout: 5000,
-  // Add GCP-specific settings
-  enableOfflineQueue: true,
-  showFriendlyErrorStack: true,
-  // Disable client name setting which is not supported on GCP Redis
-  enableAutoPipelining: false,
-  username: '', // Disable client name setting
-  keyPrefix: '' // Disable key prefix
-});
+  async consume(key: string, pointsToConsume = 1): Promise<any> {
+    Logger.debug(`[RATE-LIMITER] Dummy consume ${pointsToConsume} points for ${key}`);
+    return { remainingPoints: 999, msBeforeNext: 0 };
+  }
 
-// Add connection event handlers
-redisRateLimitClient.on('connect', () => {
-  Logger.debug(`[RATE-LIMITER] Redis client connected successfully`);
-});
+  async block(key: string, secDuration: number): Promise<any> {
+    Logger.debug(`[RATE-LIMITER] Dummy block ${key} for ${secDuration} seconds`);
+    return true;
+  }
 
-redisRateLimitClient.on('error', (err) => {
-  Logger.error(`[RATE-LIMITER] Redis client error: ${err.message}`);
-});
+  async penalty(key: string, points: number): Promise<any> {
+    Logger.debug(`[RATE-LIMITER] Dummy penalty ${points} points for ${key}`);
+    return { remainingPoints: 999, msBeforeNext: 0 };
+  }
 
-redisRateLimitClient.on('ready', () => {
-  Logger.debug(`[RATE-LIMITER] Redis client ready`);
-});
+  async reward(key: string, points: number): Promise<any> {
+    Logger.debug(`[RATE-LIMITER] Dummy reward ${points} points for ${key}`);
+    return { remainingPoints: 999, msBeforeNext: 0 };
+  }
 
-redisRateLimitClient.on('reconnecting', () => {
-  Logger.debug(`[RATE-LIMITER] Redis client reconnecting`);
-});
+  // Add properties to match RateLimiterRedis
+  points = 999;
+  duration = 60;
+  get = async (key: string) => ({ remainingPoints: 999, msBeforeNext: 0 });
+}
 
-const createRateLimiter = (keyPrefix, points) =>
-  new RateLimiterRedis({
+const createRateLimiter = (keyPrefix, points) => {
+  if (isUsingCloudTasks) {
+    return new DummyRateLimiter({});
+  }
+  return new RateLimiterRedis({
     storeClient: redisRateLimitClient,
     keyPrefix,
     points,
     duration: 60, // Duration in seconds
   });
+};
 
 export const serverRateLimiter = createRateLimiter(
   "server",
   RATE_LIMITS.account.default
 );
 
-export const testSuiteRateLimiter = new RateLimiterRedis({
-  storeClient: redisRateLimitClient,
-  keyPrefix: "test-suite",
-  points: 10000,
-  duration: 60, // Duration in seconds
-});
+export const testSuiteRateLimiter = isUsingCloudTasks 
+  ? new DummyRateLimiter({}) 
+  : new RateLimiterRedis({
+      storeClient: redisRateLimitClient,
+      keyPrefix: "test-suite",
+      points: 10000,
+      duration: 60, // Duration in seconds
+    });
 
-export const devBRateLimiter = new RateLimiterRedis({
-  storeClient: redisRateLimitClient,
-  keyPrefix: "dev-b",
-  points: 1200,
-  duration: 60, // Duration in seconds
-});
+export const devBRateLimiter = isUsingCloudTasks 
+  ? new DummyRateLimiter({}) 
+  : new RateLimiterRedis({
+      storeClient: redisRateLimitClient,
+      keyPrefix: "dev-b",
+      points: 1200,
+      duration: 60, // Duration in seconds
+    });
 
-export const manualRateLimiter = new RateLimiterRedis({
-  storeClient: redisRateLimitClient,
-  keyPrefix: "manual",
-  points: 2000,
-  duration: 60, // Duration in seconds
-});
+export const manualRateLimiter = isUsingCloudTasks 
+  ? new DummyRateLimiter({}) 
+  : new RateLimiterRedis({
+      storeClient: redisRateLimitClient,
+      keyPrefix: "manual",
+      points: 2000,
+      duration: 60, // Duration in seconds
+    });
 
-export const scrapeStatusRateLimiter = new RateLimiterRedis({
-  storeClient: redisRateLimitClient,
-  keyPrefix: "scrape-status",
-  points: 400,
-  duration: 60, // Duration in seconds
-});
+export const scrapeStatusRateLimiter = isUsingCloudTasks 
+  ? new DummyRateLimiter({}) 
+  : new RateLimiterRedis({
+      storeClient: redisRateLimitClient,
+      keyPrefix: "scrape-status",
+      points: 400,
+      duration: 60, // Duration in seconds
+    });
 
 const testSuiteTokens = ["a01ccae", "6254cf9", "0f96e673", "23befa1b", "69141c4"];
 

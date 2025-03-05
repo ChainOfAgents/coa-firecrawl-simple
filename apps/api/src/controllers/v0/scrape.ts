@@ -8,7 +8,7 @@ import {
   defaultTimeout,
   defaultOrigin,
 } from "../../lib/default-values";
-import { addScrapeJobRaw, waitForJob } from "../../services/queue-jobs";
+import { addScrapeJobRaw, waitForJob, getScrapeQueue } from "../../services/queue-jobs";
 import { v4 as uuidv4 } from "uuid";
 import { Logger } from "../../lib/logger";
 import { getJobPriority } from "../../lib/job-priority";
@@ -32,9 +32,13 @@ export async function scrapeHelper(
     return { success: false, error: "Url is required", returnCode: 400 };
   }
 
-  const jobPriority = await getJobPriority({ plan, team_id, basePriority: 10 });
+  const jobPriority = await getJobPriority({
+    plan: plan,
+    team_id: team_id,
+    basePriority: 10,
+  });
 
-  const job = await addScrapeJobRaw(
+  await addScrapeJobRaw(
     {
       url,
       mode: "single_urls",
@@ -53,7 +57,7 @@ export async function scrapeHelper(
 
   const err = (async () => {
     try {
-      doc = (await waitForJob(job.id, timeout))[0];
+      doc = (await waitForJob(jobId, timeout))[0];
     } catch (e) {
       if (e instanceof Error && e.message.startsWith("Job wait")) {
         return {
@@ -85,10 +89,12 @@ export async function scrapeHelper(
     return err;
   }
 
-  await job.remove();
+  // Clean up the job
+  const queue = getScrapeQueue();
+  await queue.removeJob(jobId);
 
   if (!doc) {
-    console.error("!!! PANIC DOC IS", doc, job);
+    console.error("!!! PANIC DOC IS", doc, jobId);
     return {
       success: true,
       error: "No page found",

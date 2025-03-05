@@ -19,51 +19,28 @@ export async function getJobs(crawlId: string, ids: string[]) {
 
 export async function crawlStatusController(req: Request, res: Response) {
   try {
-    const { success, team_id, error, status } = await authenticateUser(
-      req,
-      res,
-      RateLimiterMode.CrawlStatus
-    );
+    const { success, team_id, error, status } = await authenticateUser(req, res, RateLimiterMode.CrawlStatus);
     if (!success) {
       return res.status(status).json({ error });
     }
 
-    const sc = await getCrawl(req.params.jobId);
-    if (!sc) {
-      return res.status(404).json({ error: "Job not found" });
+    const crawlId = req.params.crawlId;
+
+    const crawl = await getCrawl(crawlId);
+    if (!crawl) {
+      return res.status(404).json({ error: "Crawl not found" });
     }
 
-    if (sc.team_id !== team_id) {
-      return res.status(403).json({ error: "Forbidden" });
+    if (crawl.team_id !== team_id) {
+      return res.status(403).json({ error: "Not authorized" });
     }
 
-    const jobIDs = await getCrawlJobs(req.params.jobId);
+    const jobIDs = await getCrawlJobs(crawlId);
+    const jobs = await getJobs(crawlId, jobIDs.map(j => j.jobId));
 
-    const jobs = (await getJobs(req.params.jobId, jobIDs)).sort((a, b) => a.timestamp - b.timestamp);
-    const jobStatuses = await Promise.all(jobs.map(x => x.getState()));
-    const jobStatus = sc.cancelled ? "failed" : jobStatuses.every(x => x === "completed") ? "completed" : jobStatuses.some(x => x === "failed") ? "failed" : "active";
-
-    const data = jobs.map(x => Array.isArray(x.returnvalue) ? x.returnvalue[0] : x.returnvalue);
-
-    if (
-      jobs.length > 0 &&
-      jobs[0].data &&
-      jobs[0].data.pageOptions &&
-      !jobs[0].data.pageOptions.includeRawHtml
-    ) {
-      data.forEach(item => {
-        if (item) {
-          delete item.rawHtml;
-        }
-      });
-    }
-
-    res.json({
-      status: jobStatus,
-      current: jobStatuses.filter(x => x === "completed" || x === "failed").length,
-      total: jobs.length,
-      data: jobStatus === "completed" ? data : null,
-      partial_data: jobStatus === "completed" ? [] : data.filter(x => x !== null),
+    return res.json({
+      jobs,
+      crawl,
     });
   } catch (error) {
     Logger.error(error);

@@ -1,13 +1,9 @@
-import { Job } from "bullmq";
-import {
-  WebScraperOptions,
-  RunWebScraperParams,
-  RunWebScraperResult,
-} from "../types";
+import { WebScraperOptions, RunWebScraperParams, RunWebScraperResult } from "../types";
 import { WebScraperDataProvider } from "../scraper/WebScraper";
 import { Progress } from "../lib/entities";
 import { Document } from "../lib/entities";
 import { Logger } from "../lib/logger";
+import { QueueJob } from "../services/queue/types";
 import { configDotenv } from "dotenv";
 configDotenv();
 
@@ -15,7 +11,7 @@ export async function startWebScraperPipeline({
   job,
   token,
 }: {
-  job: Job<WebScraperOptions>;
+  job: QueueJob;
   token: string;
 }) {
   let partialDocs: Document[] = [];
@@ -46,7 +42,7 @@ export async function startWebScraperPipeline({
           if (partialDocs.length > 50) {
             partialDocs = partialDocs.slice(-50);
           }
-          // job.updateProgress({ ...progress, partialDocs: partialDocs });
+          job.updateProgress({ ...progress, partialDocs: partialDocs });
         }
       },
       onSuccess: (result, mode) => {
@@ -55,7 +51,7 @@ export async function startWebScraperPipeline({
       },
       onError: (error) => {
         Logger.error(`🌐 Job ${job.id} failed - Error: ${error.message}`);
-        job.moveToFailed(error, token, false);
+        job.moveToFailed(error);
       },
       team_id: job.data.team_id,
       bull_job_id: job.id.toString(),

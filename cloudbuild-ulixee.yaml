@@ -1,0 +1,60 @@
+steps:
+  # Build the Ulixee service image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      [
+        'build',
+        '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:${_TAG}',
+        '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:latest',
+        '-f', 'apps/ulixee-service-ts/Dockerfile',
+        'apps/ulixee-service-ts'
+      ]
+    
+  # Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:${_TAG}']
+    
+  # Push the latest tag
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:latest']
+    
+  # Deploy Ulixee service to Cloud Run and store URL
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # Deploy Ulixee service to Cloud Run
+        gcloud run deploy ulixee-service-firecrawl-simple \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:${_TAG} \
+          --platform=managed \
+          --region=${_REGION} \
+          --cpu=1 \
+          --memory=2Gi \
+          --concurrency=80 \
+          --timeout=300s \
+          --min-instances=1 \
+          --max-instances=10 \
+          --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
+          --command="node" --args="dist/api.js" \
+          --port=8080 \
+          --set-env-vars="NODE_ENV=production,PROXY_URL=,PROXY_USERNAME=,PROXY_PASSWORD=,RUNNING_IN_CLOUD=true,CHROME_SANDBOX=false,HERO_MAX_CONCURRENT_BROWSERS=10,ULIXEE_DATABOX_SIZE_MB=100,NODE_OPTIONS=--max-old-space-size=2048" \
+        
+        # Save the URL of the deployed Ulixee service for other builds
+        SERVICE_URL=$(gcloud run services describe ulixee-service-firecrawl-simple --platform=managed --region=${_REGION} --format='value(status.url)')
+        echo "$${SERVICE_URL}/scrape" > /workspace/ulixee-service-url.txt
+        gsutil cp /workspace/ulixee-service-url.txt gs://${PROJECT_ID}-build-artifacts/ulixee-service-url.txt
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:${_TAG}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:latest'
+
+substitutions:
+  _TAG: v1
+  _REGION: us-west2
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+  
+tags: ['ulixee-service', 'web-scraper', 'firecrawl-simple']

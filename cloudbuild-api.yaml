@@ -4,47 +4,54 @@ steps:
     args:
       [
         'build',
-        '-t', 'us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:${COMMIT_SHA}',
-        '-t', 'us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:latest',
+        '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:${_TAG}',
+        '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:latest',
         '-f', 'apps/api/Dockerfile',
         'apps/api'  # Subfolder as the build context
       ]
     
   # Push the container image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:${COMMIT_SHA}']
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:${_TAG}']
     
-  # Get Redis IP and Puppeteer URL, then deploy API to Cloud Run
+  # Push the latest tag
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:latest']
+    
+  # Get Ulixee URL, then deploy API to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args: 
       - '-c'
       - |
-        # Get Redis IP
-        REDIS_IP=$(gcloud redis instances describe crawlweb-redis-noeviction --region=us-west2 --format='get(host)')
-        
-        # Get Puppeteer Service URL from Cloud Storage (or use fallback)
-        gsutil cp gs://${PROJECT_ID}-build-artifacts/puppeteer-service-url.txt /workspace/ 2>/dev/null || echo "https://puppeteer-service-url-not-found.run.app/scrape" > /workspace/puppeteer-service-url.txt
-        PLAYWRIGHT_URL=$(cat /workspace/puppeteer-service-url.txt)
+        # Set Ulixee Service URL directly
+        ULIXEE_URL="https://ulixee-service-firecrawl-simple-${PROJECT_ID}.${_REGION}.run.app/scrape"
         
         # Deploy API to Cloud Run
         gcloud run deploy api-service-firecrawl-simple \
-          --image=us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:${COMMIT_SHA} \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:${_TAG} \
           --platform=managed \
-          --region=us-west2 \
+          --region=${_REGION} \
           --cpu=1 \
           --memory=1Gi \
           --concurrency=80 \
+          --timeout=600s \
           --command="pnpm,run,start:production" \
           --vpc-connector=crawlweb-connector \
           --min-instances=0 \
           --max-instances=10 \
           --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
-          --set-env-vars="NODE_ENV=production,HOST=0.0.0.0,NUM_WORKERS_PER_QUEUE=8,REDIS_IP=$${REDIS_IP},REDIS_URL=redis://$${REDIS_IP}:6379,REDIS_RATE_LIMIT_URL=redis://$${REDIS_IP}:6379,PLAYWRIGHT_MICROSERVICE_URL=$${PLAYWRIGHT_URL},LOGGING_LEVEL=DEBUG"
+          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,PLAYWRIGHT_MICROSERVICE_URL=$${ULIXEE_URL},LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks,CLOUD_TASKS_SERVICE_URL=https://api-service-firecrawl-simple-${PROJECT_ID}.${_REGION}.run.app"
 
 images:
-  - 'us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:${COMMIT_SHA}'
-  - 'us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:latest'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:${_TAG}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:latest'
+
+substitutions:
+  _TAG: v1
+  _REGION: us-west2
 
 options:
   logging: CLOUD_LOGGING_ONLY
+  
+tags: ['api-service', 'firecrawl-simple']

@@ -34,20 +34,25 @@ RUN cd src/lib/go-html-to-md && \
 # Build the application
 RUN pnpm run build
 
-# Install runtime dependencies
-RUN apt-get install --no-install-recommends -y \
-    chromium \
-    chromium-sandbox \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives
+# Clean up build dependencies
+RUN apt-get remove -y golang-go git && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives
 
-# Create entrypoint script for debugging
+# Create entrypoint script that adapts based on service type
 RUN echo '#!/bin/bash\n\
-echo "===== API SERVICE ENVIRONMENT VARIABLES FOR DEBUGGING ====="\n\
+# Determine service type based on the command\n\
+if [[ "$@" == *"queue-worker.js"* ]]; then\n\
+  SERVICE_TYPE="WORKER"\n\
+else\n\
+  SERVICE_TYPE="API"\n\
+fi\n\
+\n\
+echo "===== ${SERVICE_TYPE} SERVICE ENVIRONMENT VARIABLES FOR DEBUGGING ====="\n\
 echo "- PORT: $PORT"\n\
 echo "- NODE_ENV: $NODE_ENV"\n\
-echo "- HOST: $HOST"\n\
-echo "- PUPPETEER_EXECUTABLE_PATH: $PUPPETEER_EXECUTABLE_PATH"\n\
 echo "- QUEUE_PROVIDER: $QUEUE_PROVIDER"\n\
+echo "- PLAYWRIGHT_MICROSERVICE_URL: $PLAYWRIGHT_MICROSERVICE_URL"\n\
 \n\
 echo "===== ALL ENVIRONMENT VARIABLES ====="\n\
 printenv | sort\n\
@@ -64,12 +69,12 @@ echo "========================================"\n\
 exec "$@"\n' > /app/docker-entrypoint.sh && \
 chmod +x /app/docker-entrypoint.sh
 
-# Environment setup
-ENV PUPPETEER_EXECUTABLE_PATH="/usr/bin/chromium"
-ENV HOST="0.0.0.0"
 # Let Cloud Run set the PORT environment variable
 EXPOSE 8080
 
-# Use entrypoint script for the API service
+# Use entrypoint script for both services
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
+
+# Default to API service if no command is provided
+# This will be overridden by the --command flag in Cloud Run
 CMD ["node", "dist/src/index.js"]

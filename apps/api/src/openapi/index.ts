@@ -27,7 +27,7 @@ const options = {
       },
     },
   },
-  apis: ["./src/controllers/v1/*.ts"],
+  apis: ["./src/controllers/v1/*.ts", "./src/index.ts"],
 };
 
 export function setupOpenAPI(app: Application & WithWebsocketMethod) {

@@ -1,0 +1,32 @@
+# Ignore git and temp files
+.git
+.gitignore
+.gcloudignore
+*.tmp
+*.temp
+
+# Ignore node modules and build artifacts
+node_modules/
+dist/
+build/
+coverage/
+
+# Ignore development files
+*.test.ts
+*.spec.ts
+__tests__/
+test/
+tests/
+
+# Ignore docs and other non-essential files
+*.md
+docs/
+examples/
+.env*
+!.env.example
+
+# Keep only the files needed for the build
+!src/
+!package*.json
+!tsconfig*.json
+!worker.Dockerfile

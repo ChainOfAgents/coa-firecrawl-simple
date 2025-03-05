@@ -1,5 +1,5 @@
 import { parseApi } from "../lib/parseApi";
-import { getRateLimiter } from "../services/rate-limiter";
+import { getRateLimiter, DummyRateLimiter } from "../services/rate-limiter";
 import { AuthResponse, PlanType, RateLimiterMode } from "../types";
 import { withAuth } from "../lib/withAuth";
 import { RateLimiterRedis } from "rate-limiter-flexible";
@@ -58,7 +58,7 @@ export async function supaAuthenticateUser(
     req.socket.remoteAddress) as string;
   const iptoken = incomingIP + token;
 
-  let rateLimiter: RateLimiterRedis;
+  let rateLimiter: RateLimiterRedis | DummyRateLimiter;
   let subscriptionData: { team_id: string; plan: string } | null = null;
   let normalizedApi: string;
 

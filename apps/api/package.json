@@ -37,6 +37,8 @@
     "typescript": "^5.4.2"
   },
   "dependencies": {
+    "@google-cloud/firestore": "^7.11.0",
+    "@google-cloud/tasks": "^5.5.2",
     "@types/express-ws": "^3.0.4",
     "@types/ws": "^8.5.12",
     "async": "^3.2.5",

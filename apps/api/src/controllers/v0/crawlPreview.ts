@@ -10,7 +10,7 @@ import {
   saveCrawl,
   StoredCrawl,
 } from "../../../src/lib/crawl-redis";
-import { addScrapeJobRaw } from "../../../src/services/queue-jobs";
+import { addScrapeJobRaw, waitForJob } from "../../../src/services/queue-jobs";
 import { checkAndUpdateURL } from "../../../src/lib/validateUrl";
 
 export async function crawlPreviewController(req: Request, res: Response) {
@@ -75,7 +75,7 @@ export async function crawlPreviewController(req: Request, res: Response) {
 
     if (sitemap !== null) {
       for (const url of sitemap.map((x) => x.url)) {
-        await lockURL(id, sc, url);
+        const jobId = uuidv4();
         const job = await addScrapeJobRaw(
           {
             url,
@@ -88,13 +88,14 @@ export async function crawlPreviewController(req: Request, res: Response) {
             sitemapped: true,
           },
           {},
-          uuidv4(),
+          jobId,
           10
         );
-        await addCrawlJob(id, job.id);
+        await addCrawlJob(id, jobId);
+        await lockURL(url, id, sc);
       }
     } else {
-      await lockURL(id, sc, url);
+      const jobId = uuidv4();
       const job = await addScrapeJobRaw(
         {
           url,
@@ -106,10 +107,11 @@ export async function crawlPreviewController(req: Request, res: Response) {
           crawl_id: id,
         },
         {},
-        uuidv4(),
+        jobId,
         10
       );
-      await addCrawlJob(id, job.id);
+      await addCrawlJob(id, jobId);
+      await lockURL(url, id, sc);
     }
 
     res.json({ jobId: id });

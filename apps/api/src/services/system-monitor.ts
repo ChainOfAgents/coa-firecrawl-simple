@@ -71,6 +71,13 @@ class SystemMonitor {
         return cpuUsage < MAX_CPU && memoryUsage < MAX_RAM;
     }
 
+    public async getSystemMetrics() {
+        return {
+            cpu: await this.checkCpuUsage(),
+            memory: await this.checkMemoryUsage()
+        };
+    }
+
     public clearCache() {
         this.cpuUsageCache = null;
         this.memoryUsageCache = null;

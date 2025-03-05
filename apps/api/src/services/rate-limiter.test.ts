@@ -3,12 +3,21 @@ import {
   serverRateLimiter,
   testSuiteRateLimiter,
   redisRateLimitClient,
+  DummyRateLimiter
 } from "./rate-limiter";
 import { RateLimiterMode } from "../../src/types";
 import { RateLimiterRedis } from "rate-limiter-flexible";
 
+// Skip tests if using Cloud Tasks
+const isUsingCloudTasks = process.env.QUEUE_PROVIDER === 'cloud-tasks';
+
 describe("Rate Limiter Service", () => {
   beforeAll(async () => {
+    if (isUsingCloudTasks) {
+      console.log('Using Cloud Tasks, skipping Redis tests');
+      return;
+    }
+    
     try {
       await redisRateLimitClient.connect();
       // if (process.env.REDIS_RATE_LIMIT_URL === "redis://localhost:6379") {
@@ -23,6 +32,8 @@ describe("Rate Limiter Service", () => {
   });
 
   afterAll(async () => {
+    if (isUsingCloudTasks) return;
+    
     try {
       // if (process.env.REDIS_RATE_LIMIT_URL === "redis://localhost:6379") {
         await redisRateLimitClient.disconnect();
@@ -35,13 +46,24 @@ describe("Rate Limiter Service", () => {
       "crawl" as RateLimiterMode,
       "test-prefix:a01ccae"
     );
-    expect(limiter).toBe(testSuiteRateLimiter);
+    
+    // Handle both RateLimiterRedis and DummyRateLimiter
+    if (isUsingCloudTasks) {
+      expect(limiter).toBeInstanceOf(DummyRateLimiter);
+    } else {
+      expect(limiter).toBe(testSuiteRateLimiter);
+    }
 
     const limiter2 = getRateLimiter(
       "scrape" as RateLimiterMode,
       "test-prefix:6254cf9"
     );
-    expect(limiter2).toBe(testSuiteRateLimiter);
+    
+    if (isUsingCloudTasks) {
+      expect(limiter2).toBeInstanceOf(DummyRateLimiter);
+    } else {
+      expect(limiter2).toBe(testSuiteRateLimiter);
+    }
   });
 
   it("should return the serverRateLimiter if mode is not found", () => {
@@ -49,8 +71,19 @@ describe("Rate Limiter Service", () => {
       "nonexistent" as RateLimiterMode,
       "test-prefix:someToken"
     );
-    expect(limiter).toBe(serverRateLimiter);
+    
+    if (isUsingCloudTasks) {
+      expect(limiter).toBeInstanceOf(DummyRateLimiter);
+    } else {
+      expect(limiter).toBe(serverRateLimiter);
+    }
   });
+
+  // Skip the remaining tests if using Cloud Tasks
+  if (isUsingCloudTasks) {
+    it.skip("Skipping Redis-specific tests when using Cloud Tasks", () => {});
+    return;
+  }
 
   it("should return the correct rate limiter based on mode and plan", () => {
     const limiter = getRateLimiter(

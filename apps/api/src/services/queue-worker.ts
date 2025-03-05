@@ -3,12 +3,11 @@ import { CustomError } from "../lib/custom-error";
 import {
   getScrapeQueue,
   redisConnection,
-  scrapeQueueName,
+  SCRAPE_QUEUE_NAME,
 } from "./queue-service";
 import { logtail } from "./logtail";
 import { startWebScraperPipeline } from "../main/runWebScraper";
 import { Logger } from "../lib/logger";
-import { Job, Worker } from "bullmq";
 import systemMonitor from "./system-monitor";
 import { v4 as uuidv4 } from "uuid";
 import {
@@ -20,7 +19,7 @@ import {
   getCrawlJobs,
   lockURL,
 } from "../lib/crawl-redis";
-import { StoredCrawl } from "../lib/crawl-redis";
+import { StoredCrawl, CrawlJob } from "../lib/crawl-redis";
 import { addScrapeJobRaw } from "./queue-jobs";
 import {
   addJobPriority,
@@ -33,22 +32,41 @@ import { configDotenv } from "dotenv";
 import { callWebhook } from "../../src/scraper/WebScraper/single_url";
 import express from "express";
 import { Document, DocumentUrl } from "../lib/entities";
+import { QueueJob } from "./queue/types";
 configDotenv();
 
 // Set up a simple HTTP server for Cloud Run health checks
 const app = express();
-const port = process.env.PORT || 3002;
+// Use the PORT environment variable provided by Cloud Run
+const port = process.env.PORT || 8080;
 const host = process.env.HOST || "0.0.0.0";
 
-// Health check endpoint
+/**
+ * Health check endpoint for Cloud Run
+ * This endpoint is used by Cloud Run to determine if the worker service is healthy
+ * It returns a 200 OK response with a simple message
+ */
 app.get("/health", (req, res) => {
   res.status(200).send("Worker is healthy");
 });
 
 // Start the HTTP server
-const server = app.listen(Number(port), host, () => {
-  Logger.info(`Worker healthcheck server listening on port ${port}`);
-});
+try {
+  Logger.info(`Attempting to start worker server on ${host}:${port}`);
+  const server = app.listen(Number(port), host, () => {
+    Logger.info(`Worker healthcheck server listening on ${host}:${port}`);
+    Logger.info(`Health check available at http://${host}:${port}/health`);
+  });
+
+  server.on('error', (error) => {
+    Logger.error(`Server error: ${error.message}`);
+    console.error('Worker server failed to start:', error);
+  });
+} catch (error) {
+  Logger.error(`Failed to start worker server: ${error.message}`);
+  console.error('Exception during worker server startup:', error);
+  throw error;
+}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -70,19 +88,9 @@ const MAX_EMPTY_POLLS = 5;
 // Base polling interval when queue is empty (in ms)
 const BASE_EMPTY_INTERVAL = 1000;
 
-export async function processJobInternal(token: string, job: Job) {
+export async function processJobInternal(token: string, job: QueueJob) {
   Logger.info(`[Job ${job.id}] Starting job processing`);
   
-  // Set up lock extension interval
-  const extendLockInterval = setInterval(async () => {
-    try {
-      await job.extendLock(token, jobLockExtensionTime);
-      Logger.debug(`[Job ${job.id}] Lock extended successfully`);
-    } catch (e) {
-      Logger.error(`[Job ${job.id}] Failed to extend job lock: ${e.message}`);
-    }
-  }, jobLockExtendInterval);
-
   try {
     Logger.debug(`[Job ${job.id}] Processing job with token: ${token}`);
     const result = await processJob(job, token);
@@ -91,7 +99,7 @@ export async function processJobInternal(token: string, job: Job) {
     try {
       Logger.debug(`[Job ${job.id}] Attempting to move job to completed state`);
       try {
-        await job.moveToCompleted(result.docs, token, false);
+        await job.moveToCompleted(result.docs);
         Logger.debug(`[Job ${job.id}] Successfully moved job to completed state`);
         
         // Verify job state after completion
@@ -107,9 +115,9 @@ export async function processJobInternal(token: string, job: Job) {
           
           // Update the job data in Redis directly through the queue
           Logger.debug(`[Job ${job.id}] Adding completed job data to queue`);
-          await getScrapeQueue().add(
-            job.name, 
-            { ...job.data, completed: true, success: true, docs: result.docs }, 
+          await getScrapeQueue().addJob(
+            job.name,
+            { ...job.data, completed: true, success: true, docs: result.docs },
             { jobId: job.id, priority: job.opts.priority }
           );
           Logger.debug(`[Job ${job.id}] Alternative completion strategy succeeded`);
@@ -122,7 +130,7 @@ export async function processJobInternal(token: string, job: Job) {
           // Last resort - try to remove the job and mark it as completed
           try {
             Logger.debug(`[Job ${job.id}] Attempting last resort - removing job`);
-            await getScrapeQueue().remove(job.id);
+            await getScrapeQueue().removeJob(job.id);
             Logger.info(`[Job ${job.id}] Successfully removed job as last resort`);
           } catch (removeError) {
             Logger.error(`[Job ${job.id}] Failed to remove job: ${removeError.message}`);
@@ -138,18 +146,16 @@ export async function processJobInternal(token: string, job: Job) {
     Logger.debug(`[Job ${job.id}] Error stack trace: ${e.stack}`);
     try {
       Logger.info(`[Job ${job.id}] Moving job to failed state`);
-      await job.moveToFailed(e, token);
+      await job.moveToFailed(e);
       Logger.info(`[Job ${job.id}] Successfully moved job to failed state`);
     } catch (moveError) {
       Logger.error(`[Job ${job.id}] Error moving job to failed state: ${moveError.message}`);
     }
     throw e;
-  } finally {
-    clearInterval(extendLockInterval);
   }
 }
 
-async function processJob(job: Job, token: string) {
+async function processJob(job: QueueJob, token: string) {
   const startTime = Date.now();
   Logger.info(`[Job ${job.id}] Starting web scraper pipeline`);
   Logger.debug(`[Job ${job.id}] Processing job with data: ${JSON.stringify(job.data)}`);
@@ -199,101 +205,69 @@ async function processJob(job: Job, token: string) {
         await addCrawlJobDone(job.data.crawl_id, job.id);
 
         const sc = await getCrawl(job.data.crawl_id) as StoredCrawl;
-        if (!job.data.sitemapped && !sc.cancelled) {
-          await processCrawlLinks(job, docs, sc);
-        }
-        await finishCrawl(job.data.crawl_id);
+        await processCrawlLinks(job, docs, sc);
       }
 
-      const data = {
-        success,
-        result: {
-          links: docs.map((doc) => ({
-            content: doc,
-            source: doc?.metadata?.sourceURL ?? doc?.url ?? "",
-          })),
-        },
-        project_id: job.data.project_id,
-        error: message,
-        docs,
-      };
-
-      Logger.info(`[Job ${job.id}] Job completed successfully in ${Date.now() - startTime}ms`);
-      return data;
+      return { success: true, docs };
     } finally {
-      Logger.info(`[Job ${job.id}] Removing job priority`);
       await deleteJobPriority(job.data.team_id, job.id);
     }
   } catch (error) {
-    Logger.error(`[Job ${job.id}] Error in job processing: ${error.message}`);
-    Logger.debug(`[Job ${job.id}] Error stack trace: ${error.stack}`);
-
-    if (error instanceof CustomError) {
-      logtail.error("Custom error while ingesting", {
-        job_id: job.id,
-        error: error.message,
-        dataIngestionJob: error.dataIngestionJob,
-      });
-    } else {
-      logtail.error("Overall error ingesting", {
-        job_id: job.id,
-        error: error.message,
-      });
-    }
-
-    return {
-      success: false,
-      docs: [],
-      project_id: job.data.project_id,
-      error: "Something went wrong... Contact help@mendable.ai or try again.",
-    };
+    Logger.error(`[Job ${job.id}] Job processing failed: ${error.message}`);
+    throw error;
   }
 }
 
-// Helper function for processing crawl links
-async function processCrawlLinks(job: Job, docs: any[], sc: StoredCrawl) {
+async function processCrawlLinks(job: QueueJob, docs: any[], sc: StoredCrawl) {
   Logger.info(`[Job ${job.id}] Processing links for crawl ID: ${job.data.crawl_id}`);
   const crawler = crawlToCrawler(job.data.crawl_id, sc);
   
-  // Get the source URL from the first document
-  const firstDoc = docs[0] as Document;
-  const sourceURL = firstDoc?.metadata?.sourceURL || firstDoc?.url;
-  const rawHtml = firstDoc?.rawHtml || "";
+  if (!job.data.sitemapped && !sc.cancelled) {
+    const links = docs.map((doc) => doc.url).filter((url) => url);
+    const existingJobs: CrawlJob[] = await getCrawlJobs(job.data.crawl_id);
+    const existingUrls = new Set(existingJobs.map(j => j.url));
+    const newLinks = links.filter((url) => !existingUrls.has(url));
 
-  if (sourceURL) {
-    const links = crawler.extractLinksFromHTML(rawHtml, sourceURL);
-    
-    for (const link of links) {
-      if (await lockURL(job.data.crawl_id, sc, link)) {
-        const jobPriority = await getJobPriority({
-          plan: sc.plan as PlanType,
-          team_id: sc.team_id,
-          basePriority: job.data.crawl_id ? 20 : 10,
-        });
-        
-        Logger.debug(`[Job ${job.id}] Adding scrape job for link: ${link}`);
-        const newJob = await addScrapeJobRaw(
+    Logger.info(
+      `[Job ${job.id}] Found ${newLinks.length} new links to crawl for crawl ID: ${job.data.crawl_id}`
+    );
+
+    for (const url of newLinks) {
+      try {
+        // Check if URL is locked (being processed by another crawler)
+        const isLocked = await lockURL(url, job.data.crawl_id, sc);
+        if (!isLocked) {
+          Logger.debug(`[Job ${job.id}] URL ${url} is already being processed, skipping`);
+          continue;
+        }
+
+        // Add new job for this URL
+        const jobId = uuidv4();
+        const jobPriority = 10;
+        await addScrapeJobRaw(
           {
-            url: link,
-            mode: "single_urls",
-            crawlerOptions: sc.crawlerOptions,
-            team_id: sc.team_id,
-            pageOptions: sc.pageOptions,
-            webhookUrl: job.data.webhookUrl,
-            webhookMetadata: job.data.webhookMetadata,
+            url,
+            crawlerOptions: crawler,
+            team_id: job.data.team_id,
+            pageOptions: job.data.pageOptions,
             origin: job.data.origin,
             crawl_id: job.data.crawl_id,
-            v1: job.data.v1,
+            sitemapped: true,
           },
-          {},
-          uuidv4(),
-          jobPriority,
+          {
+            priority: jobPriority,
+          },
+          jobId,
+          jobPriority
         );
-
-        await addCrawlJob(job.data.crawl_id, newJob.id);
+        await addCrawlJob(job.data.crawl_id, jobId);
+      } catch (error) {
+        Logger.error(`[Job ${job.id}] Error processing URL ${url}: ${error.message}`);
       }
     }
   }
+
+  await finishCrawl(job.data.crawl_id);
 }
 
 let isShuttingDown = false;
@@ -303,106 +277,65 @@ process.on("SIGINT", () => {
   isShuttingDown = true;
 });
 
-const workerFun = async (
+async function workerFun(
   queueName: string,
-  processJobInternal: (token: string, job: Job) => Promise<any>,
-) => {
+  processJobInternal: (token: string, job: QueueJob) => Promise<any>,
+) {
   Logger.info(`Starting worker for queue: ${queueName}`);
-  
-  // Use environment variable for Redis URL
-  const redisUrl = process.env.REDIS_URL;
-  if (!redisUrl) {
-    Logger.error('REDIS_URL environment variable is not set');
-    throw new Error('REDIS_URL environment variable is required');
-  }
-  Logger.info(`Using Redis URL from environment: ${redisUrl}`);
-  
-  try {
-    // Test Redis connection
-    const pingResponse = await redisConnection.ping();
-    Logger.info(`Redis connection test: ${pingResponse}`);
-  } catch (error) {
-    Logger.error(`Redis connection test failed: ${error.message}`);
-    throw error; // Don't continue if we can't connect to Redis
-  }
-  
-  const worker = new Worker(
-    queueName,
-    async (job) => {
-      const token = uuidv4();
-      return await processJobInternal(token, job);
-    },
-    {
-      connection: redisConnection,
-      concurrency: 2
-    }
-  );
+  const queue = getScrapeQueue();
+  let emptyPolls = 0;
 
-  worker.on('error', err => {
-    Logger.error(`Worker error: ${err.message}`);
-  });
-
-  worker.on('failed', (job, err) => {
-    Logger.error(`Job ${job?.id} failed: ${err.message}`);
-  });
-
-  worker.on('completed', job => {
-    Logger.info(`Job ${job?.id} completed successfully`);
-  });
-
-  worker.startStalledCheckTimer();
-  Logger.info(`Started stalled job check timer`);
-
-  const monitor = await systemMonitor;
-  Logger.info(`System resource monitor initialized`);
-
-  let attemptCount = 0;
-  let emptyQueueCount = 0;
-  
-  while (true) {
-    if (isShuttingDown) {
-      Logger.info("No longer accepting new jobs. SIGINT received.");
-      break;
-    }
-
-    const canAcceptConnection = await monitor.acceptConnection();
-    
-    if (!canAcceptConnection) {
-      Logger.debug(`Cannot accept connection due to resource constraints. CPU/RAM limits reached.`);
-      await sleep(cantAcceptConnectionInterval);
-      continue;
-    }
-
+  while (!isShuttingDown) {
     try {
-      Logger.debug(`Attempt #${++attemptCount} to get next job from queue ${queueName}`);
-      const job = await worker.getNextJob(uuidv4());
-      
-      if (job) {
-        emptyQueueCount = 0; // Reset empty queue counter
-        Logger.info(`Got job ${job.id}. Mode: ${job.data.mode}, Team: ${job.data.team_id}`);
-        
-        await processJobInternal(uuidv4(), job);
-        Logger.debug(`Job ${job.id} processing started`);
-        await sleep(gotJobInterval);
-      } else {
-        emptyQueueCount++;
-        // Calculate exponential backoff interval
-        const backoffInterval = Math.min(
-          BASE_EMPTY_INTERVAL * Math.pow(2, Math.floor(emptyQueueCount / MAX_EMPTY_POLLS)),
-          30000 // Max 30 second interval
+      // Check system resources
+      const monitor = await systemMonitor;
+      const { cpu, memory } = await monitor.getSystemMetrics();
+      if (cpu > MAX_CPU || memory > MAX_RAM) {
+        Logger.warn(
+          `System resources too high (CPU: ${cpu}, RAM: ${memory}), waiting ${cantAcceptConnectionInterval}ms`
         );
-        
-        // Only log every MAX_EMPTY_POLLS attempts
-        if (emptyQueueCount % MAX_EMPTY_POLLS === 0) {
-          Logger.debug(`No jobs available after ${emptyQueueCount} attempts. Waiting ${backoffInterval}ms`);
-        }
-        await sleep(backoffInterval);
+        await sleep(cantAcceptConnectionInterval);
+        continue;
       }
+
+      // Get next job
+      const job = await queue.getNextJob?.();
+
+      if (!job) {
+        emptyPolls++;
+        // Exponential backoff for empty polls
+        const waitTime = Math.min(
+          BASE_EMPTY_INTERVAL * Math.pow(2, emptyPolls),
+          cantAcceptConnectionInterval
+        );
+        await sleep(waitTime);
+        continue;
+      }
+
+      // Reset empty polls counter when we get a job
+      emptyPolls = 0;
+
+      try {
+        const token = uuidv4();
+        await processJobInternal(token, job);
+      } catch (error) {
+        Logger.error(`Error processing job ${job.id}: ${error.message}`);
+        if (error.stack) {
+          Logger.debug(`Error stack trace: ${error.stack}`);
+        }
+      }
+
+      // Wait a bit before processing next job
+      await sleep(gotJobInterval);
     } catch (error) {
-      Logger.error(`Error getting next job: ${error.message}`);
-      await sleep(connectionMonitorInterval * 2); // Double the interval on error
+      Logger.error(`Worker error: ${error.message}`);
+      if (error.stack) {
+        Logger.debug(`Error stack trace: ${error.stack}`);
+      }
+      // Wait longer on error
+      await sleep(connectionMonitorInterval * 2);
     }
   }
-};
+}
 
-workerFun(scrapeQueueName, processJobInternal);
+workerFun(SCRAPE_QUEUE_NAME, processJobInternal);

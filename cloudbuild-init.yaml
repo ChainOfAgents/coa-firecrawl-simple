@@ -7,30 +7,38 @@ steps:
       - |
         gsutil mb -p ${PROJECT_ID} gs://${PROJECT_ID}-build-artifacts || echo "Bucket already exists"
   
-  # Create VPC connector if it doesn't exist
+  # Create a Cloud Tasks queue if it doesn't exist
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        gcloud compute networks vpc-access connectors describe crawlweb-connector --region=us-west2 || \
-        gcloud compute networks vpc-access connectors create crawlweb-connector \
-          --region=us-west2 \
-          --network=default \
-          --range=10.8.0.0/28
+        gcloud tasks queues describe crawlweb-tasks --location=${_REGION} || \
+        gcloud tasks queues create crawlweb-tasks \
+          --location=${_REGION} \
+          --max-dispatches-per-second=500 \
+          --max-concurrent-dispatches=1000 \
+          --max-attempts=100
+  
+  # Ensure the service account has Cloud Tasks Admin permissions
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+          --member="serviceAccount:crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+          --role="roles/cloudtasks.admin" || echo "IAM binding already exists"
 
-  # Create Redis instance if it doesn't exist
+  # Ensure the service account has Firestore Admin permissions
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        gcloud redis instances describe crawlweb-redis-noeviction --region=us-west2 || \
-        gcloud redis instances create crawlweb-redis-noeviction \
-          --size=1 \
-          --region=us-west2 \
-          --tier=basic \
-          --redis-version=redis_6_x
+        gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+          --member="serviceAccount:crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+          --role="roles/datastore.owner" || echo "Firestore IAM binding already exists"
 
   # Create a Cloud Scheduler job for health checks
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -38,12 +46,15 @@ steps:
     args:
       - '-c'
       - |
-        gcloud scheduler jobs describe crawlweb-healthcheck --location=us-west2 || \
+        gcloud scheduler jobs describe crawlweb-healthcheck --location=${_REGION} || \
         gcloud scheduler jobs create http crawlweb-healthcheck \
-          --location=us-west2 \
+          --location=${_REGION} \
           --schedule="*/5 * * * *" \
-          --uri="https://crawlweb-api-dot-${PROJECT_ID}.run.app/v1/health/liveness" \
+          --uri="https://api-service-firecrawl-simple-${PROJECT_ID}.${_REGION}.run.app/v1/health/liveness" \
           --http-method=GET
+
+substitutions:
+  _REGION: us-west2
 
 options:
   logging: CLOUD_LOGGING_ONLY

@@ -2,33 +2,38 @@ steps:
   # No need to rebuild the image since the worker uses the same image as the API
   # We'll reuse the image built by the API build
   
-  # Get Redis IP, Puppeteer URL, and deploy worker to Cloud Run
+  # Get Puppeteer Service URL from Cloud Storage (or use fallback)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        # Get Redis IP
-        REDIS_IP=$(gcloud redis instances describe crawlweb-redis-noeviction --region=us-west2 --format='get(host)')
+        ULIXEE_URL="https://ulixee-service-firecrawl-simple-${PROJECT_ID}.${_REGION}.run.app/scrape"
         
-        # Get Puppeteer Service URL from Cloud Storage (or use fallback)
-        gsutil cp gs://${PROJECT_ID}-build-artifacts/puppeteer-service-url.txt /workspace/ 2>/dev/null || echo "https://puppeteer-service-url-not-found.run.app/scrape" > /workspace/puppeteer-service-url.txt
-        PLAYWRIGHT_URL=$(cat /workspace/puppeteer-service-url.txt)
+        # Build the Docker image
+        docker build -t ${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-worker:${_TAG} -f apps/api/Dockerfile.worker apps/api
         
         # Deploy worker to Cloud Run
         gcloud run deploy worker-service-firecrawl-simple \
-          --image=us-west2-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:latest \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-worker:${_TAG} \
           --platform=managed \
-          --region=us-west2 \
+          --region=${_REGION} \
           --cpu=1 \
           --memory=1Gi \
           --concurrency=20 \
-          --command="pnpm,run,worker:production" \
+          --timeout=600s \
           --vpc-connector=crawlweb-connector \
           --min-instances=1 \
           --max-instances=5 \
           --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
-          --set-env-vars="NODE_ENV=production,HOST=0.0.0.0,NUM_WORKERS_PER_QUEUE=8,REDIS_IP=$${REDIS_IP},REDIS_URL=redis://$${REDIS_IP}:6379,REDIS_RATE_LIMIT_URL=redis://$${REDIS_IP}:6379,PLAYWRIGHT_MICROSERVICE_URL=$${PLAYWRIGHT_URL},LOGGING_LEVEL=BUILD"
+          --command="node" --args="dist/src/services/queue-worker.js" \
+          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,PLAYWRIGHT_MICROSERVICE_URL=$${ULIXEE_URL},LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks,CLOUD_TASKS_SERVICE_URL=https://worker-service-firecrawl-simple-${PROJECT_ID}.${_REGION}.run.app"
+
+substitutions:
+  _TAG: v1
+  _REGION: us-west2
 
 options:
   logging: CLOUD_LOGGING_ONLY
+
+tags: ['worker-service', 'firecrawl-simple']

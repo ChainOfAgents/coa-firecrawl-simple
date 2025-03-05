@@ -1,18 +1,84 @@
-import { Job } from "bullmq";
+import { QueueJobData, QueueJobOptions } from "./queue/types";
 import { getScrapeQueue } from "./queue-service";
 import { Logger } from "../lib/logger";
+import { v4 as uuidv4 } from 'uuid';
+
+// Export getScrapeQueue for use in other files
+export { getScrapeQueue } from "./queue-service";
+
+// Default team ID for system-generated requests
+const DEFAULT_TEAM_ID = 'system';
 
 export async function addScrapeJobRaw(
-  webScraperOptions: any,
-  options: any,
+  webScraperOptions: QueueJobData,
+  options: QueueJobOptions,
   jobId: string,
   jobPriority: number = 10
-): Promise<Job> {
-  return await getScrapeQueue().add(jobId, webScraperOptions, {
+): Promise<string> {
+  // Ensure team_id is defined
+  if (webScraperOptions && webScraperOptions.team_id === undefined) {
+    webScraperOptions.team_id = DEFAULT_TEAM_ID;
+    Logger.debug(`Setting default team_id (${DEFAULT_TEAM_ID}) for job ${jobId}`);
+  }
+  
+  return await getScrapeQueue().addJob(jobId, webScraperOptions, {
     ...options,
     priority: jobPriority,
     jobId,
   });
+}
+
+/**
+ * Add a scrape job to the queue
+ * @param url URL to scrape
+ * @param options Job options
+ * @returns Job ID
+ */
+export async function addScrapeJob(
+  url: string,
+  options: {
+    team_id?: string;
+    user_id?: string;
+    priority?: number;
+    delay?: number;
+    ttl?: number;
+    timeout?: number;
+    removeLinks?: boolean;
+    maxLinks?: number;
+    maxDepth?: number;
+    followLinks?: boolean;
+    waitTime?: number;
+    proxy?: string;
+    userAgent?: string;
+    cookies?: Record<string, string>;
+    headers?: Record<string, string>;
+    [key: string]: any;
+  } = {}
+): Promise<string> {
+  const data = {
+    url,
+    team_id: options.team_id || DEFAULT_TEAM_ID, // Use default team_id if undefined
+    user_id: options.user_id,
+    removeLinks: options.removeLinks,
+    maxLinks: options.maxLinks,
+    maxDepth: options.maxDepth,
+    followLinks: options.followLinks,
+    waitTime: options.waitTime,
+    proxy: options.proxy,
+    userAgent: options.userAgent,
+    cookies: options.cookies,
+    headers: options.headers,
+  };
+
+  const jobOptions = {
+    priority: options.priority,
+    delay: options.delay,
+    ttl: options.ttl,
+    timeout: options.timeout,
+  };
+
+  const jobId = uuidv4(); // Generate a unique job ID
+  return addScrapeJobRaw(data, jobOptions, jobId, options.priority);
 }
 
 export function waitForJob(jobId: string, timeout: number) {

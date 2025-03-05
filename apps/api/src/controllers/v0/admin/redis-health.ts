@@ -1,9 +1,15 @@
 import { Request, Response } from "express";
-import Redis from "ioredis";
+import Redis, { RedisOptions } from "ioredis";
 import { Logger } from "../../../lib/logger";
 import { redisRateLimitClient } from "../../../services/rate-limiter";
 
 export async function redisHealthController(req: Request, res: Response) {
+  // Skip Redis health check if using Cloud Tasks
+  if (process.env.QUEUE_PROVIDER === 'cloud-tasks') {
+    Logger.info('[REDIS-HEALTH] Using Cloud Tasks, skipping Redis health check');
+    return res.status(200).json({ status: "healthy", details: { message: "Using Cloud Tasks, Redis not required" } });
+  }
+
   const retryOperation = async (operation, retries = 3) => {
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
@@ -18,13 +24,16 @@ export async function redisHealthController(req: Request, res: Response) {
 
   try {
     // Use Redis URL from environment
+    if (process.env.QUEUE_PROVIDER !== 'bull') {
+      return res.status(200).send('OK');
+    }
     const redisUrl = process.env.REDIS_URL;
     if (!redisUrl) {
       throw new Error('REDIS_URL environment variable is not set');
     }
     Logger.info(`[REDIS-HEALTH] Using Redis URL from environment`);
     
-    const queueRedis = new Redis(redisUrl, {
+    const redisOptions: RedisOptions = {
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
       retryStrategy(times) {
@@ -38,7 +47,18 @@ export async function redisHealthController(req: Request, res: Response) {
         }
         return false;
       }
-    });
+    };
+    
+    // Add GCP-specific settings that aren't in the type definition
+    const queueRedis = new Redis(redisUrl, {
+      ...redisOptions,
+      // These options aren't in the type definition but are needed for GCP Redis
+      disableClientSetname: true, // Prevents 'client setname' command from being sent
+      clientName: '', // Sets an empty client name
+      username: '', // Disable client name setting
+      keyPrefix: '', // Disable key prefix
+      enableAutoPipelining: false // Disables auto pipelining
+    } as any); // Type assertion needed for custom Redis options
 
     const testKey = "test";
     const testValue = "test";
@@ -96,6 +116,15 @@ export async function redisHealthController(req: Request, res: Response) {
 }
 
 export async function checkRedisContent(req: Request, res: Response) {
+  // Skip Redis content check if using Cloud Tasks
+  if (process.env.QUEUE_PROVIDER === 'cloud-tasks') {
+    Logger.info('[REDIS-HEALTH] Using Cloud Tasks, skipping Redis content check');
+    return res.json({
+      success: true,
+      message: "Using Cloud Tasks, Redis not required"
+    });
+  }
+
   try {
     // Check if Redis is connected
     if (redisRateLimitClient.status !== 'ready') {

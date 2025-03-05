@@ -42,12 +42,11 @@ RUN apt-get install --no-install-recommends -y \
 
 # Create entrypoint script for debugging
 RUN echo '#!/bin/bash\n\
-echo "===== API SERVICE ENVIRONMENT VARIABLES FOR DEBUGGING ====="\n\
+echo "===== WORKER SERVICE ENVIRONMENT VARIABLES FOR DEBUGGING ====="\n\
 echo "- PORT: $PORT"\n\
 echo "- NODE_ENV: $NODE_ENV"\n\
 echo "- HOST: $HOST"\n\
 echo "- PUPPETEER_EXECUTABLE_PATH: $PUPPETEER_EXECUTABLE_PATH"\n\
-echo "- QUEUE_PROVIDER: $QUEUE_PROVIDER"\n\
 \n\
 echo "===== ALL ENVIRONMENT VARIABLES ====="\n\
 printenv | sort\n\
@@ -67,9 +66,9 @@ chmod +x /app/docker-entrypoint.sh
 # Environment setup
 ENV PUPPETEER_EXECUTABLE_PATH="/usr/bin/chromium"
 ENV HOST="0.0.0.0"
-# Let Cloud Run set the PORT environment variable
+# Cloud Run will set the PORT environment variable to 8080
 EXPOSE 8080
 
-# Use entrypoint script for the API service
+# Use entrypoint script for the Worker service
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["node", "dist/src/index.js"]
+CMD ["node", "dist/src/services/queue-worker.js"]

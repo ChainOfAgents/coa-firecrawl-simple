@@ -7,7 +7,7 @@ x-common-service: &common-service
   environment:
     - REDIS_URL=${REDIS_URL:-redis://redis:6379}
     - REDIS_RATE_LIMIT_URL=${REDIS_URL:-redis://redis:6379}
-    - PLAYWRIGHT_MICROSERVICE_URL=${PLAYWRIGHT_MICROSERVICE_URL:-http://playwright-service:3000}
+    - PLAYWRIGHT_MICROSERVICE_URL=${PLAYWRIGHT_MICROSERVICE_URL:-http://ulixee-service:3000/scrape}
     - PORT=${PORT:-3002}
     - NUM_WORKERS_PER_QUEUE=${NUM_WORKERS_PER_QUEUE}
     - BULL_AUTH_KEY=${BULL_AUTH_KEY}
@@ -20,6 +20,31 @@ x-common-service: &common-service
     - "host.docker.internal:host-gateway"
 
 services:
+  ulixee-service:
+    image: firecrawl/ulixee-service
+    build:
+      context: ./apps/ulixee-service-ts/
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - PROXY_URL=${PROXY_URL}
+      - PROXY_USERNAME=${PROXY_USERNAME}
+      - PROXY_PASSWORD=${PROXY_PASSWORD}
+      - HERO_MAX_CONCURRENT_BROWSERS=10
+      - ULIXEE_DATABOX_SIZE_MB=100
+      - NODE_OPTIONS=--max-old-space-size=2048
+      - CHROME_SANDBOX=false
+      - RUNNING_IN_CLOUD=${RUNNING_IN_CLOUD:-false}
+      - CHROME_PATH=${CHROME_PATH:-/usr/bin/chromium}
+    ports:
+      - "3000:3000"
+    networks:
+      - backend
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    restart: unless-stopped
+
   puppeteer-service:
     image: trieve/puppeteer-service-ts
     build:
@@ -40,7 +65,7 @@ services:
     <<: *common-service
     depends_on:
       - redis
-      - puppeteer-service
+      - ulixee-service
     ports:
       - "3002:3002"
     command: ["pnpm", "run", "start:production"]
@@ -49,7 +74,7 @@ services:
     <<: *common-service
     depends_on:
       - redis
-      - puppeteer-service
+      - ulixee-service
       - api
     command: ["pnpm", "run", "workers"]
 
