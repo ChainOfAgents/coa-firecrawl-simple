@@ -56,6 +56,8 @@ export interface RunWebScraperResult {
   success: boolean;
   message: string;
   docs: Document[] | DocumentUrl[];
+  originalDocsCount?: number;
+  mode?: string;
 }
 
 export interface FirecrawlJob {

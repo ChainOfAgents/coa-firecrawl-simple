@@ -125,6 +125,7 @@ export type Document = {
   rawHtml?: string;
   links?: string[];
   screenshot?: string;
+  content?: string;
   metadata: {
     title?: string;
     description?: string;
@@ -266,6 +267,7 @@ export function legacyScrapeOptions(x: ScrapeOptions): PageOptions {
 export function legacyDocumentConverter(doc: any): Document {
   if (doc === null || doc === undefined) return null;
 
+  // Safely handle metadata properties
   if (doc.metadata) {
     if (doc.metadata.screenshot) {
       doc.screenshot = doc.metadata.screenshot;
@@ -278,19 +280,27 @@ export function legacyDocumentConverter(doc: any): Document {
     }
   }
 
+  // Create a safe metadata object
+  const metadata = doc.metadata || {};
+
   return {
-    markdown: doc.markdown,
-    links: doc.linksOnPage.filter((x: any) => x !== null),
-    rawHtml: doc.rawHtml,
-    html: doc.html,
-    extract: doc.llm_extraction,
-    screenshot: doc.screenshot ?? doc.fullPageScreenshot,
+    markdown: doc.markdown || undefined,
+    links: doc.linksOnPage ? doc.linksOnPage.filter((x: any) => x !== null) : [],
+    rawHtml: doc.rawHtml || undefined,
+    html: doc.html || undefined,
+    content: doc.content || undefined,
+    extract: doc.llm_extraction || undefined,
+    screenshot: doc.screenshot || doc.fullPageScreenshot || undefined,
     metadata: {
-      ...doc.metadata,
+      ...metadata,
       pageError: undefined,
       pageStatusCode: undefined,
-      error: doc.metadata.pageError,
-      statusCode: doc.metadata.pageStatusCode,
+      error: metadata.pageError,
+      statusCode: metadata.pageStatusCode,
+      // Ensure these common metadata fields are always defined
+      title: metadata.title || undefined,
+      description: metadata.description || undefined,
+      sourceURL: metadata.sourceURL || undefined,
     },
   };
 }

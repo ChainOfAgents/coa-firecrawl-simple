@@ -60,4 +60,10 @@ export class Logger {
   static trace(message: string) {
     Logger.log(message, LogLevel.TRACE);
   }
+
+  static setLevel(level: string) {
+    // This is a no-op as the log level is set via environment variable
+    // But we add this method for compatibility with test scripts
+    console.log(`Setting log level to ${level} (Note: This is a no-op, use LOGGING_LEVEL env var instead)`);
+  }
 }

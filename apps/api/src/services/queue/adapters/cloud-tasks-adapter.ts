@@ -28,7 +28,8 @@ export class CloudTasksJob implements QueueJob {
   }
 
   get id(): string {
-    return this.taskName.split('/').pop()!;
+    // Use the jobId from options if available, otherwise use the Cloud Tasks ID
+    return this.opts.jobId || this.taskName.split('/').pop()!;
   }
 
   get name(): string {

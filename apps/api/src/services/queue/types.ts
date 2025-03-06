@@ -29,6 +29,9 @@ export interface QueueJobResult {
   success: boolean;
   message?: string;
   data?: any;
+  docs?: any[];
+  originalDocsCount?: number;
+  mode?: string;
 }
 
 export interface QueueJob {

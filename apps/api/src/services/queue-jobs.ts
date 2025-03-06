@@ -91,10 +91,10 @@ export async function addScrapeJob(
 }
 
 export async function waitForJob(jobId: string, timeout = 60000): Promise<any> {
-  Logger.debug(`Waiting for job ${jobId} with timeout ${timeout}ms`);
-  
   const startTime = Date.now();
   let lastState = '';
+  
+  Logger.debug(`[QUEUE-JOBS] Starting to wait for job ${jobId} with timeout ${timeout}ms`);
   
   while (Date.now() - startTime < timeout) {
     try {
@@ -103,25 +103,69 @@ export async function waitForJob(jobId: string, timeout = 60000): Promise<any> {
       
       // Log state changes
       if (jobState !== lastState) {
-        Logger.debug(`Job ${jobId} state: ${jobState}`);
+        Logger.debug(`[QUEUE-JOBS] Job ${jobId} state: ${jobState}`);
         lastState = jobState;
       }
       
       // Check if the job is completed or failed
       if (jobState === 'completed') {
+        Logger.debug(`[QUEUE-JOBS] Job ${jobId} is completed, retrieving result`);
+        
         // Get the job result
         const result = await getScrapeQueue().getJobResult(jobId);
+        Logger.debug(`[QUEUE-JOBS] Job ${jobId} result retrieved: ${result ? 'has data' : 'null or undefined'}`);
+        
+        if (result) {
+          // Log information about the result
+          const resultType = typeof result;
+          Logger.debug(`[QUEUE-JOBS] Job ${jobId} result type: ${resultType}`);
+          
+          if (resultType === 'object') {
+            if (Array.isArray(result)) {
+              Logger.debug(`[QUEUE-JOBS] Job ${jobId} result is an array with ${result.length} items`);
+            } else if (result !== null) {
+              Logger.debug(`[QUEUE-JOBS] Job ${jobId} result keys: ${Object.keys(result).join(', ')}`);
+              
+              // Check if result has docs field
+              if (result.docs) {
+                Logger.debug(`[QUEUE-JOBS] Job ${jobId} result has docs array with ${result.docs.length} items`);
+              }
+            }
+          }
+        }
+        
+        // If result is null or undefined, wait a bit longer and try again
+        if (!result) {
+          Logger.warn(`[QUEUE-JOBS] Job ${jobId} has completed state but no result, waiting for result to be available`);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          continue;
+        }
+        
+        Logger.debug(`[QUEUE-JOBS] Successfully retrieved result for job ${jobId}`);
         return result;
       } else if (jobState === 'failed') {
         // Get the job error
+        Logger.debug(`[QUEUE-JOBS] Job ${jobId} is failed, retrieving error`);
         const error = await getScrapeQueue().getJobError(jobId);
+        
         if (error) {
+          Logger.error(`[QUEUE-JOBS] Job ${jobId} failed with error: ${error.message}`);
           throw error;
         } else {
+          Logger.error(`[QUEUE-JOBS] Job ${jobId} failed without an error message`);
           throw new Error(`Job ${jobId} failed without an error message`);
         }
       } else if (jobState === 'unknown' || jobState === 'not_found') {
+        Logger.error(`[QUEUE-JOBS] Job ${jobId} not found`);
         throw new Error(`Job ${jobId} not found`);
+      } else {
+        // For other states (created, waiting, active), log the time spent waiting
+        const elapsedTime = Date.now() - startTime;
+        const remainingTime = timeout - elapsedTime;
+        
+        if (elapsedTime % 5000 < 200) { // Log approximately every 5 seconds
+          Logger.debug(`[QUEUE-JOBS] Still waiting for job ${jobId}, state: ${jobState}, elapsed: ${elapsedTime}ms, remaining: ${remainingTime}ms`);
+        }
       }
       
       // Wait before checking again
@@ -129,15 +173,19 @@ export async function waitForJob(jobId: string, timeout = 60000): Promise<any> {
     } catch (error) {
       // If the error is about the job not being found, throw it immediately
       if (error.message && error.message.includes('not found')) {
+        Logger.error(`[QUEUE-JOBS] Error: ${error.message}`);
         throw error;
       }
       
       // For other errors, log and continue trying
-      Logger.error(`Error checking job ${jobId} state: ${error}`);
+      Logger.error(`[QUEUE-JOBS] Error checking job ${jobId} state: ${error}`);
+      Logger.error(`[QUEUE-JOBS] Error details: ${JSON.stringify(error)}`);
       await new Promise(resolve => setTimeout(resolve, 500));
     }
   }
   
   // If we've reached here, the job has timed out
-  throw new Error(`Timeout waiting for job ${jobId} after ${timeout}ms`);
+  const errorMessage = `Timeout waiting for job ${jobId} after ${timeout}ms`;
+  Logger.error(`[QUEUE-JOBS] ${errorMessage}`);
+  throw new Error(errorMessage);
 }
