@@ -51,6 +51,8 @@ export interface QueueProvider {
   removeJob(jobId: string): Promise<void>;
   processJob(jobId: string, processor: (job: QueueJob) => Promise<QueueJobResult>): Promise<void>;
   getJobState(jobId: string): Promise<string>;
+  getJobResult(jobId: string): Promise<any>; 
+  getJobError(jobId: string): Promise<Error | null>; 
   updateJobProgress(jobId: string, progress: number | object): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;

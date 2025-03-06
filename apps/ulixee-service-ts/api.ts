@@ -375,11 +375,19 @@ app.post("/scrape", validateUrl, async (req: Request, res: Response) => {
         await tab.waitForMillis(Math.min(additionalWaitTime, 2000)); // Reduced from 5000ms to 2000ms
       }
       
-      // Wait for page to stabilize - use a shorter timeout
-      await Promise.race([
-        tab.waitForPaintingStable({ timeoutMs: 1000 }),
-        tab.waitForMillis(1000) // Reduced from 2000ms to 1000ms
-      ]);
+      // Wait for page to stabilize with a more robust approach
+      try {
+        // First try to wait for painting stable with a longer timeout
+        await Promise.race([
+          tab.waitForPaintingStable({ timeoutMs: 5000 }),
+          tab.waitForMillis(3000) // Fallback if painting never stabilizes
+        ]);
+      } catch (stabilizeError) {
+        // If waiting for painting stable fails, log and continue anyway
+        console.warn(`Page stabilization timed out for ${url}: ${stabilizeError.message}`);
+        // Give the page a bit more time anyway
+        await tab.waitForMillis(2000);
+      }
       
       // Get the HTML content
       const html = await tab.document.documentElement.innerHTML;
@@ -406,6 +414,26 @@ app.post("/scrape", validateUrl, async (req: Request, res: Response) => {
     } catch (error: unknown) {
       console.error(`Error during scraping (attempt ${retries + 1}/${maxRetries}):`, error);
       
+      // Try to capture more context about the error
+      let errorContext = {};
+      let errorMessage = error instanceof Error ? error.message : String(error);
+      
+      try {
+        if (heroInstance) {
+          // Try to get the current URL if possible
+          const tabs = await heroInstance.tabs;
+          if (tabs.length > 0) {
+            const currentTab = tabs[0];
+            errorContext = {
+              currentUrl: await currentTab.url.catch(() => 'unknown'),
+              statusCode: await currentTab.lastCommandId.catch(() => 'unknown')
+            };
+          }
+        }
+      } catch (contextError) {
+        console.warn('Failed to capture error context:', contextError);
+      }
+      
       // Close the current hero instance if it failed
       if (heroInstance) {
         try {
@@ -422,11 +450,11 @@ app.post("/scrape", validateUrl, async (req: Request, res: Response) => {
       
       // If we've reached max retries, return an error
       if (retries >= maxRetries) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
         return res.status(500).json({
           error: errorMessage || "An error occurred during scraping",
           url,
-          status: 500
+          status: 500,
+          context: errorContext
         });
       }
       

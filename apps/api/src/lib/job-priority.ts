@@ -50,7 +50,13 @@ export async function getJobPriority({
     const setKey = SET_KEY_PREFIX + safeTeamId;
 
     // Get the length of the set
-    const setLength = await redisConnection.scard(setKey);
+    let setLength = 0;
+    try {
+      setLength = await redisConnection.scard(setKey);
+    } catch (redisError) {
+      Logger.error(`Redis error in getJobPriority: ${redisError}`);
+      // Continue with setLength = 0 if Redis fails
+    }
 
     // Determine the priority based on the plan and set length
     let planModifier = 1;
@@ -93,7 +99,7 @@ export async function getJobPriority({
     }
   } catch (e) {
     Logger.error(
-      `Get job priority failed: ${team_id}, ${plan}, ${basePriority}`
+      `Get job priority failed: ${team_id || 'undefined'}, ${plan || 'undefined'}, ${basePriority}`
     );
     return basePriority;
   }

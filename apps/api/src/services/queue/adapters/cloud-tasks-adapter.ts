@@ -2,12 +2,14 @@ import { CloudTasksClient } from '@google-cloud/tasks';
 import { QueueProvider, QueueJob, QueueJobData, QueueJobOptions, QueueJobResult } from '../types';
 import { stateManager } from '../../state-management/firestore-state';
 import { Logger } from '../../../lib/logger';
+import { v4 as uuidv4 } from 'uuid';
 
 // Cloud Tasks configuration
 const projectId = process.env.GOOGLE_CLOUD_PROJECT;
 const location = process.env.CLOUD_TASKS_LOCATION;
 const queueId = process.env.CLOUD_TASKS_QUEUE;
 const serviceUrl = process.env.CLOUD_TASKS_SERVICE_URL;
+const serviceAccountEmail = process.env.CLOUD_TASKS_SERVICE_ACCOUNT_EMAIL;
 
 // Initialize Cloud Tasks client
 const client = new CloudTasksClient();
@@ -17,7 +19,13 @@ export class CloudTasksJob implements QueueJob {
     private taskName: string,
     public data: QueueJobData,
     public opts: QueueJobOptions
-  ) {}
+  ) {
+    // Ensure data has at least a url property
+    if (!this.data.url) {
+      this.data.url = 'unknown';
+      Logger.warn(`[CLOUD-TASKS] Created job with missing url, setting to 'unknown'`);
+    }
+  }
 
   get id(): string {
     return this.taskName.split('/').pop()!;
@@ -54,7 +62,7 @@ export class CloudTasksAdapter implements QueueProvider {
   private failedCallback?: (jobId: string, error: Error) => void;
 
   constructor(queueName: string) {
-    if (!projectId || !location || !queueId || !serviceUrl) {
+    if (!projectId || !location || !queueId || !serviceUrl || !serviceAccountEmail) {
       throw new Error('Missing required Cloud Tasks configuration');
     }
     this.parent = client.queuePath(projectId, location, queueId);
@@ -62,6 +70,9 @@ export class CloudTasksAdapter implements QueueProvider {
 
   async addJob(name: string, data: QueueJobData, options: QueueJobOptions = {}): Promise<string> {
     try {
+      // Use the provided jobId or generate a new one if not provided
+      const originalJobId = options.jobId || uuidv4();
+      
       const task = {
         name: '',
         httpRequest: {
@@ -70,7 +81,16 @@ export class CloudTasksAdapter implements QueueProvider {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: Buffer.from(JSON.stringify({ name, data, options })).toString('base64'),
+          // Include the originalJobId in the task data so the worker knows which job to update
+          body: Buffer.from(JSON.stringify({ 
+            name, 
+            data, 
+            options: { ...options, jobId: originalJobId } 
+          })).toString('base64'),
+          oidcToken: {
+            serviceAccountEmail: serviceAccountEmail,
+            audience: serviceUrl
+          }
         },
       };
 
@@ -86,10 +106,21 @@ export class CloudTasksAdapter implements QueueProvider {
         task,
       });
 
-      const jobId = response.name!.split('/').pop()!;
-      await stateManager.createJob(jobId, name, data, options);
-
-      return jobId;
+      const cloudTasksId = response.name!.split('/').pop()!;
+      
+      // Store the mapping between originalJobId and cloudTasksId in the job data
+      const jobData = {
+        ...data,
+        cloudTasksId: cloudTasksId // Store the Cloud Tasks ID in the job data
+      };
+      
+      // Create the job state using the originalJobId, not the Cloud Tasks ID
+      await stateManager.createJob(originalJobId, name, jobData, options);
+      
+      Logger.debug(`Created Cloud Tasks job with original ID ${originalJobId} and Cloud Tasks ID ${cloudTasksId}`);
+      
+      // Return the originalJobId, not the Cloud Tasks ID
+      return originalJobId;
     } catch (error) {
       Logger.error(`[CLOUD-TASKS] Error creating task: ${error}`);
       throw error;
@@ -98,20 +129,58 @@ export class CloudTasksAdapter implements QueueProvider {
 
   async getJob(jobId: string): Promise<QueueJob | null> {
     try {
-      const taskName = `${this.parent}/tasks/${jobId}`;
-      const [task] = await client.getTask({ name: taskName });
-      
-      if (!task) {
+      // First, get the job data from Firestore to find the Cloud Tasks ID
+      const jobState = await stateManager.getJobData(jobId);
+      if (!jobState) {
+        Logger.error(`[CLOUD-TASKS] Job ${jobId} not found in Firestore`);
         return null;
       }
-
-      const { name, data, options } = JSON.parse(
-        Buffer.from(task.httpRequest!.body as string, 'base64').toString()
-      );
-
-      return new CloudTasksJob(task.name!, data, options);
+      
+      // Use the cloudTasksId from the job data if available
+      const cloudTasksId = jobState.data?.cloudTasksId || jobId;
+      const taskName = `${this.parent}/tasks/${cloudTasksId}`;
+      
+      try {
+        const [task] = await client.getTask({ name: taskName });
+        
+        // Create a CloudTasksJob instance
+        try {
+          const bodyString = Buffer.from(task.httpRequest!.body as string, 'base64').toString();
+          const bodyData = JSON.parse(bodyString);
+          
+          return new CloudTasksJob(
+            task.name!,
+            bodyData.data && typeof bodyData.data === 'object' ? 
+              bodyData.data : 
+              { url: 'unknown', ...bodyData.data },
+            bodyData.options || { jobId }
+          );
+        } catch (parseError) {
+          Logger.error(`[CLOUD-TASKS] Error parsing task body for job ${jobId}: ${parseError}`);
+          
+          // Fall back to using the Firestore data
+          return new CloudTasksJob(
+            taskName,
+            jobState.data && typeof jobState.data === 'object' ? 
+              jobState.data : 
+              { url: 'unknown', ...jobState.data },
+            { jobId }
+          );
+        }
+      } catch (error) {
+        Logger.error(`[CLOUD-TASKS] Error getting task ${cloudTasksId} for job ${jobId}: ${error}`);
+        
+        // Even if we can't get the task from Cloud Tasks, we can still return a job based on Firestore data
+        return new CloudTasksJob(
+          taskName,
+          jobState.data && typeof jobState.data === 'object' ? 
+            jobState.data : 
+            { url: 'unknown', ...jobState.data },
+          { jobId }
+        );
+      }
     } catch (error) {
-      Logger.error(`[CLOUD-TASKS] Error getting task ${jobId}: ${error}`);
+      Logger.error(`[CLOUD-TASKS] Error getting job ${jobId}: ${error}`);
       return null;
     }
   }
@@ -153,6 +222,15 @@ export class CloudTasksAdapter implements QueueProvider {
 
   async getJobState(jobId: string): Promise<string> {
     return await stateManager.getJobState(jobId);
+  }
+
+  async getJobResult(jobId: string): Promise<any> {
+    return await stateManager.getJobResult(jobId);
+  }
+
+  async getJobError(jobId: string): Promise<Error | null> {
+    const error = await stateManager.getJobError(jobId);
+    return error ? new Error(error) : null;
   }
 
   async updateJobProgress(jobId: string, progress: number | object): Promise<void> {

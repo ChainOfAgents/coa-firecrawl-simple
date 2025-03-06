@@ -233,7 +233,30 @@ export class BullAdapter implements QueueProvider {
   }
 
   async getJobState(jobId: string): Promise<string> {
-    return await this.queue.getJobState(jobId);
+    const job = await this.queue.getJob(jobId);
+    if (!job) {
+      return 'unknown';
+    }
+    return await job.getState();
+  }
+
+  async getJobResult(jobId: string): Promise<any> {
+    const job = await this.queue.getJob(jobId);
+    if (!job) {
+      return null;
+    }
+    return job.returnvalue;
+  }
+
+  async getJobError(jobId: string): Promise<Error | null> {
+    const job = await this.queue.getJob(jobId);
+    if (!job) {
+      return null;
+    }
+    if (job.failedReason) {
+      return new Error(job.failedReason);
+    }
+    return null;
   }
 
   async updateJobProgress(jobId: string, progress: number | object): Promise<void> {

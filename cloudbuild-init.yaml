@@ -13,8 +13,8 @@ steps:
     args:
       - '-c'
       - |
-        gcloud tasks queues describe crawlweb-tasks --location=${_REGION} || \
-        gcloud tasks queues create crawlweb-tasks \
+        gcloud tasks queues describe crawlweb-tasks-queue --location=${_REGION} || \
+        gcloud tasks queues create crawlweb-tasks-queue \
           --location=${_REGION} \
           --max-dispatches-per-second=500 \
           --max-concurrent-dispatches=1000 \
@@ -39,6 +39,27 @@ steps:
         gcloud projects add-iam-policy-binding ${PROJECT_ID} \
           --member="serviceAccount:crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
           --role="roles/datastore.owner" || echo "Firestore IAM binding already exists"
+
+  # Grant the Cloud Tasks service account permission to invoke the worker service
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # Get the project number
+        PROJECT_NUMBER=$(gcloud projects describe ${PROJECT_ID} --format="value(projectNumber)")
+        
+        # Grant the Cloud Tasks service account the run.invoker role on the worker service
+        gcloud run services add-iam-policy-binding worker-service-firecrawl-simple \
+          --member="serviceAccount:service-$${PROJECT_NUMBER}@gcp-sa-cloudtasks.iam.gserviceaccount.com" \
+          --role="roles/run.invoker" \
+          --region=${_REGION} || echo "Cloud Tasks invoker binding already exists"
+        
+        # Also grant the Cloud Tasks service account the run.invoker role on the Ulixee service
+        gcloud run services add-iam-policy-binding ulixee-service-firecrawl-simple \
+          --member="serviceAccount:crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+          --role="roles/run.invoker" \
+          --region=${_REGION} || echo "Ulixee service invoker binding already exists"
 
   # Create a Cloud Scheduler job for health checks
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'

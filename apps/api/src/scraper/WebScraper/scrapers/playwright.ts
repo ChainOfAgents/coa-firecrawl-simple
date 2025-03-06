@@ -27,7 +27,8 @@ export async function scrapeWithPlaywright(
       process.env.PLAYWRIGHT_MICROSERVICE_URL,
       {
         url: url,
-        wait_after_load: waitParam,
+        additionalWaitTime: waitParam,
+        timeout: universalTimeout,
         headers: headers,
       },
       {
@@ -54,12 +55,20 @@ export async function scrapeWithPlaywright(
     const textData = response.data;
     try {
       const data = JSON.parse(textData);
-      const html = data.content;
+      // Handle different response formats from the Ulixee service
+      // The Ulixee service returns html in the 'html' field, not 'content'
+      const html = data.content || data.html || "";
+      const pageStatusCode = data.pageStatusCode || data.status || 200;
+      const pageError = data.pageError || data.error || "";
+
+      if (pageError) {
+        Logger.warn(`Page error for ${url}: ${pageError}`);
+      }
 
       return {
-        content: html ?? "",
-        pageStatusCode: data.pageStatusCode,
-        pageError: data.pageError,
+        content: html,
+        pageStatusCode,
+        pageError,
       };
     } catch (jsonError) {
       Logger.error(

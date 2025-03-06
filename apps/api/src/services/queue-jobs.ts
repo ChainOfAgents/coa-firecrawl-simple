@@ -21,11 +21,20 @@ export async function addScrapeJobRaw(
     Logger.debug(`Setting default team_id (${DEFAULT_TEAM_ID}) for job ${jobId}`);
   }
   
-  return await getScrapeQueue().addJob(jobId, webScraperOptions, {
+  // Add the job to the queue
+  const queueJobId = await getScrapeQueue().addJob(jobId, webScraperOptions, {
     ...options,
     priority: jobPriority,
     jobId,
   });
+  
+  // Log if the queue provider returned a different job ID
+  if (queueJobId !== jobId) {
+    Logger.warn(`Queue provider returned a different job ID (${queueJobId}) than requested (${jobId})`);
+  }
+  
+  // Always return the original jobId for consistency
+  return jobId;
 }
 
 /**
@@ -81,76 +90,54 @@ export async function addScrapeJob(
   return addScrapeJobRaw(data, jobOptions, jobId, options.priority);
 }
 
-export function waitForJob(jobId: string, timeout: number) {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    let retryCount = 0;
-    
-    const int = setInterval(async () => {
-      // Check for timeout
-      if (Date.now() >= start + timeout) {
-        clearInterval(int);
-        Logger.error(`Job wait timeout for job ${jobId} after ${timeout}ms`);
-        reject(new Error("Job wait timeout"));
-        return;
+export async function waitForJob(jobId: string, timeout = 60000): Promise<any> {
+  Logger.debug(`Waiting for job ${jobId} with timeout ${timeout}ms`);
+  
+  const startTime = Date.now();
+  let lastState = '';
+  
+  while (Date.now() - startTime < timeout) {
+    try {
+      // Get the current job state
+      const jobState = await getScrapeQueue().getJobState(jobId);
+      
+      // Log state changes
+      if (jobState !== lastState) {
+        Logger.debug(`Job ${jobId} state: ${jobState}`);
+        lastState = jobState;
       }
-
-      try {
-        // Set a timeout for this specific Redis command
-        const getJobPromise = getScrapeQueue().getJob(jobId);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Redis command timeout')), 3000)
-        );
-        
-        const job = await Promise.race([getJobPromise, timeoutPromise]);
-        
-        if (!job) {
-          Logger.error(`Job ${jobId} not found`);
-          clearInterval(int);
-          reject(new Error(`Job ${jobId} not found`));
-          return;
-        }
-        
-        // Get job state with timeout protection
-        const getStatePromise = (job as any).getState();
-        const stateTimeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Get state command timeout')), 3000)
-        );
-        
-        const state = await Promise.race([getStatePromise, stateTimeoutPromise]);
-        Logger.debug(`Job ${jobId} state: ${state}`);
-        
-        if (state === 'completed') {
-          clearInterval(int);
-          // Type assertion to handle the unknown type
-          const returnData = (job as any).returnvalue;
-          Logger.info(`Job ${jobId} completed successfully in ${Date.now() - start}ms`);
-          resolve(returnData);
-        } else if (state === 'failed') {
-          clearInterval(int);
-          // Type assertion to handle the unknown type
-          const failReason = (job as any).failedReason || 'Unknown error';
-          Logger.error(`Job ${jobId} failed: ${failReason}`);
-          reject(new Error(`Job ${jobId} failed: ${failReason}`));
-        }
-      } catch (error) {
-        // Handle Redis timeouts
-        if (error.message.includes('timeout')) {
-          retryCount++;
-          Logger.error(`Redis timeout (attempt ${retryCount}) checking job ${jobId}: ${error.message}`);
-          
-          // If we've had too many timeouts, abort
-          if (retryCount > 10) {
-            clearInterval(int);
-            Logger.error(`Too many Redis timeouts (${retryCount}) for job ${jobId}`);
-            reject(new Error("Redis connection unstable"));
-          }
+      
+      // Check if the job is completed or failed
+      if (jobState === 'completed') {
+        // Get the job result
+        const result = await getScrapeQueue().getJobResult(jobId);
+        return result;
+      } else if (jobState === 'failed') {
+        // Get the job error
+        const error = await getScrapeQueue().getJobError(jobId);
+        if (error) {
+          throw error;
         } else {
-          // Handle other errors
-          Logger.error(`Error checking job state for ${jobId}: ${error.message}`);
-          retryCount++;
+          throw new Error(`Job ${jobId} failed without an error message`);
         }
+      } else if (jobState === 'unknown' || jobState === 'not_found') {
+        throw new Error(`Job ${jobId} not found`);
       }
-    }, 250); // Poll every 250ms
-  });
+      
+      // Wait before checking again
+      await new Promise(resolve => setTimeout(resolve, 200));
+    } catch (error) {
+      // If the error is about the job not being found, throw it immediately
+      if (error.message && error.message.includes('not found')) {
+        throw error;
+      }
+      
+      // For other errors, log and continue trying
+      Logger.error(`Error checking job ${jobId} state: ${error}`);
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  
+  // If we've reached here, the job has timed out
+  throw new Error(`Timeout waiting for job ${jobId} after ${timeout}ms`);
 }

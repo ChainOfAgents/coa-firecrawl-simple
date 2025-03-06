@@ -168,15 +168,64 @@ export class FirestoreStateManager {
 
   async getJobState(jobId: string): Promise<string> {
     try {
-      const doc = await this.jobsCollection.doc(jobId).get();
-      if (!doc.exists) {
-        return 'not_found';
+      const jobDoc = await this.jobsCollection.doc(jobId).get();
+      if (!jobDoc.exists) {
+        Logger.error(`[STATE-MANAGER] Job ${jobId} not found`);
+        return 'unknown';
       }
-      const data = doc.data() as JobState;
-      return data.status;
+      
+      const jobData = jobDoc.data() as JobState;
+      return jobData.status;
     } catch (error) {
-      Logger.error(`[STATE-MANAGER] Error getting job ${jobId} state: ${error}`);
-      throw error;
+      Logger.error(`[STATE-MANAGER] Error getting job state for ${jobId}: ${error}`);
+      return 'unknown';
+    }
+  }
+
+  async getJobResult(jobId: string): Promise<any> {
+    try {
+      const jobDoc = await this.jobsCollection.doc(jobId).get();
+      if (!jobDoc.exists) {
+        Logger.error(`[STATE-MANAGER] Job ${jobId} not found when getting result`);
+        return null;
+      }
+      
+      const jobData = jobDoc.data() as JobState;
+      return jobData.result;
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error getting job result for ${jobId}: ${error}`);
+      return null;
+    }
+  }
+
+  async getJobError(jobId: string): Promise<string | null> {
+    try {
+      const jobDoc = await this.jobsCollection.doc(jobId).get();
+      if (!jobDoc.exists) {
+        Logger.error(`[STATE-MANAGER] Job ${jobId} not found when getting error`);
+        return null;
+      }
+      
+      const jobData = jobDoc.data() as JobState;
+      return jobData.error || null;
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error getting job error for ${jobId}: ${error}`);
+      return null;
+    }
+  }
+
+  async getJobData(jobId: string): Promise<JobState | null> {
+    try {
+      const jobDoc = await this.jobsCollection.doc(jobId).get();
+      if (!jobDoc.exists) {
+        Logger.error(`[STATE-MANAGER] Job ${jobId} not found when getting job data`);
+        return null;
+      }
+      
+      return jobDoc.data() as JobState;
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error getting job data for ${jobId}: ${error}`);
+      return null;
     }
   }
 

@@ -41,7 +41,7 @@ steps:
           --min-instances=0 \
           --max-instances=10 \
           --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
-          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,PLAYWRIGHT_MICROSERVICE_URL=$${ULIXEE_URL},LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks,CLOUD_TASKS_SERVICE_URL=https://api-service-firecrawl-simple-${PROJECT_ID}.${_REGION}.run.app"
+          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,PLAYWRIGHT_MICROSERVICE_URL=https://ulixee-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app/scrape,LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks-queue,CLOUD_TASKS_SERVICE_URL=https://worker-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app,CLOUD_TASKS_SERVICE_ACCOUNT_EMAIL=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com"
         
         echo "API service deployed successfully."
         
@@ -54,14 +54,22 @@ steps:
           --memory=1Gi \
           --concurrency=20 \
           --timeout=600s \
-          --command="node" --args="dist/src/services/queue-worker.js" \
+          --command="node" --args="dist/src/services/task-worker.js" \
           --vpc-connector=crawlweb-connector \
           --min-instances=1 \
           --max-instances=5 \
           --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
-          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,PLAYWRIGHT_MICROSERVICE_URL=$${ULIXEE_URL},LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks,CLOUD_TASKS_SERVICE_URL=https://worker-service-firecrawl-simple-${PROJECT_ID}.${_REGION}.run.app"
+          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,PLAYWRIGHT_MICROSERVICE_URL=https://ulixee-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app/scrape,LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks-queue,CLOUD_TASKS_SERVICE_URL=https://worker-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app,CLOUD_TASKS_SERVICE_ACCOUNT_EMAIL=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com"
         
         echo "Worker service deployed successfully."
+        
+        # Grant Cloud Tasks service account permission to invoke the worker service
+        gcloud run services add-iam-policy-binding worker-service-firecrawl-simple \
+          --member=serviceAccount:service-${_PROJECT_NUMBER}@gcp-sa-cloudtasks.iam.gserviceaccount.com \
+          --role=roles/run.invoker \
+          --region=${_REGION}
+        
+        echo "Granted Cloud Tasks service account permission to invoke the worker service."
 
 images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-unified:${_TAG}'
@@ -70,6 +78,7 @@ images:
 substitutions:
   _TAG: v1
   _REGION: us-west2
+  _PROJECT_NUMBER: "475988465347"
 
 options:
   logging: CLOUD_LOGGING_ONLY
