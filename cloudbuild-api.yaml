@@ -41,7 +41,7 @@ steps:
           --min-instances=0 \
           --max-instances=10 \
           --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
-          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,PLAYWRIGHT_MICROSERVICE_URL=$${ULIXEE_URL},LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks,CLOUD_TASKS_SERVICE_URL=https://api-service-firecrawl-simple-${PROJECT_ID}.${_REGION}.run.app"
+          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,PLAYWRIGHT_MICROSERVICE_URL=$${ULIXEE_URL},LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks,CLOUD_TASKS_SERVICE_URL=https://worker-service-firecrawl-simple-${PROJECT_ID}.${_REGION}.run.app"
 
 images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-api:${_TAG}'
