@@ -1,4 +1,4 @@
-import { scrapeStatusRateLimiter } from "../../services/rate-limiter";
+import { defaultRateLimiter } from "../../services/rate-limiter";
 
 /**
  * @openapi
@@ -29,7 +29,7 @@ import { scrapeStatusRateLimiter } from "../../services/rate-limiter";
  */
 export async function scrapeStatusController(req: any, res: any) {
   try {
-    const rateLimiter = scrapeStatusRateLimiter;
+    const rateLimiter = defaultRateLimiter;
     const incomingIP = (req.headers["x-forwarded-for"] ||
       req.socket.remoteAddress) as string;
     const iptoken = incomingIP;

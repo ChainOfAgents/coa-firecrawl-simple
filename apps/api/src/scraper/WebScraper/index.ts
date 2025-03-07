@@ -1,9 +1,7 @@
-import { Document, PageOptions, WebScraperOptions } from "../../lib/entities";
-import { Progress } from "../../lib/entities";
+import { Document, PageOptions, WebScraperOptions, Progress } from "../../lib/entities";
 import { scrapeSingleUrl } from "./single_url";
 import { SitemapEntry, fetchSitemapData, getLinksFromSitemap } from "./sitemap";
 import { WebCrawler } from "./crawler";
-import { getValue, setValue } from "../../services/redis";
 import {
   replaceImgPathsWithAbsolutePaths,
   replacePathsWithAbsolutePaths,
@@ -287,7 +285,6 @@ export class WebScraperDataProvider {
     documents: Document[],
     links: string[],
   ): Promise<Document[]> {
-    // await this.setCachedDocuments(documents, links);
     documents = this.removeChildLinks(documents);
     return documents.splice(0, this.limit);
   }
@@ -295,16 +292,7 @@ export class WebScraperDataProvider {
   private async processDocumentsWithCache(
     inProgress?: (progress: Progress) => void,
   ): Promise<Document[]> {
-    let documents = await this.getCachedDocuments(
-      this.urls.slice(0, this.limit),
-    );
-    if (documents.length < this.limit) {
-      const newDocuments: Document[] = await this.getDocuments(
-        false,
-        inProgress,
-      );
-      documents = this.mergeNewDocuments(documents, newDocuments);
-    }
+    let documents = [];
     documents = this.filterDocsExcludeInclude(documents);
     documents = this.filterDepth(documents);
     documents = this.removeChildLinks(documents);
@@ -375,61 +363,6 @@ export class WebScraperDataProvider {
   private removeChildLinks(documents: Document[]): Document[] {
     for (let document of documents) {
       if (document?.childrenLinks) delete document.childrenLinks;
-    }
-    return documents;
-  }
-
-  async setCachedDocuments(documents: Document[], childrenLinks?: string[]) {
-    for (const document of documents) {
-      if (document.content.trim().length === 0) {
-        continue;
-      }
-      const normalizedUrl = this.normalizeUrl(document.metadata.sourceURL);
-      await setValue(
-        "web-scraper-cache:" + normalizedUrl,
-        JSON.stringify({
-          ...document,
-          childrenLinks: childrenLinks || [],
-        }),
-        60 * 60,
-      ); // 10 days
-    }
-  }
-
-  async getCachedDocuments(urls: string[]): Promise<Document[]> {
-    let documents: Document[] = [];
-    for (const url of urls) {
-      const normalizedUrl = this.normalizeUrl(url);
-      Logger.debug(
-        "Getting cached document for web-scraper-cache:" + normalizedUrl,
-      );
-      const cachedDocumentString = await getValue(
-        "web-scraper-cache:" + normalizedUrl,
-      );
-      if (cachedDocumentString) {
-        const cachedDocument = JSON.parse(cachedDocumentString);
-        documents.push(cachedDocument);
-
-        // get children documents
-        for (const childUrl of cachedDocument.childrenLinks || []) {
-          const normalizedChildUrl = this.normalizeUrl(childUrl);
-          const childCachedDocumentString = await getValue(
-            "web-scraper-cache:" + normalizedChildUrl,
-          );
-          if (childCachedDocumentString) {
-            const childCachedDocument = JSON.parse(childCachedDocumentString);
-            if (
-              !documents.find(
-                (doc) =>
-                  doc.metadata.sourceURL ===
-                  childCachedDocument.metadata.sourceURL,
-              )
-            ) {
-              documents.push(childCachedDocument);
-            }
-          }
-        }
-      }
     }
     return documents;
   }

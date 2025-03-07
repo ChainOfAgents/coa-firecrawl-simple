@@ -1,15 +1,15 @@
 import { parseApi } from "../lib/parseApi";
-import { getRateLimiter, UnlimitedRateLimiter } from "../services/rate-limiter";
+import { getRateLimiter } from "../services/rate-limiter";
 import { AuthResponse, PlanType, RateLimiterMode } from "../types";
 import { withAuth } from "../lib/withAuth";
 import { Logger } from "../lib/logger";
-import { setValue } from "../services/redis";
 import { validate } from "uuid";
 
 function normalizedApiIsUuid(potentialUuid: string): boolean {
   // Check if the string is a valid UUID
   return validate(potentialUuid);
 }
+
 export async function authenticateUser(
   req,
   res,
@@ -17,11 +17,12 @@ export async function authenticateUser(
 ): Promise<AuthResponse> {
   return withAuth(supaAuthenticateUser)(req, res, mode);
 }
+
 function setTrace(team_id: string, api_key: string) {
   try {
-    console.log("Setting trace attributes");
+    Logger.debug(`[AUTH] Team ${team_id} authenticated with API key ${api_key}`);
   } catch (error) {
-    Logger.error(`Error setting trace attributes: ${error.message}`);
+    Logger.error(`[AUTH] Error setting trace: ${error.message}`);
   }
 }
 
@@ -57,7 +58,7 @@ export async function supaAuthenticateUser(
     req.socket.remoteAddress) as string;
   const iptoken = incomingIP + token;
 
-  let rateLimiter: UnlimitedRateLimiter;
+  let rateLimiter;
   let subscriptionData: { team_id: string; plan: string } | null = null;
   let normalizedApi: string;
 
@@ -155,11 +156,7 @@ export async function supaAuthenticateUser(
     // await sendNotification(team_id, NotificationType.RATE_LIMIT_REACHED, startDate.toISOString(), endDate.toISOString());
     // Cache longer for 429s
     if (teamId && priceId && mode !== RateLimiterMode.Preview) {
-      await setValue(
-        cacheKey,
-        JSON.stringify({ team_id: teamId, price_id: priceId }),
-        60 // 10 seconds, cache for everything
-      );
+      // Removed Redis dependency
     }
 
     return {
@@ -197,6 +194,7 @@ export async function supaAuthenticateUser(
     plan: (subscriptionData.plan ?? "") as PlanType,
   };
 }
+
 function getPlanByPriceId(price_id: string): PlanType {
   switch (price_id) {
     case process.env.STRIPE_PRICE_ID_STARTER:

@@ -201,7 +201,7 @@ export class FirestoreStateManager {
               docs: cleanResult.docs?.map(doc => {
                 if (doc.content) {
                   // Allow up to 1000KB per document for content
-                  const maxContentSize = 1000000;
+                  const maxContentSize = 900000;
                   return {
                     ...doc,
                     content: doc.content.substring(0, maxContentSize) + (doc.content.length > maxContentSize ? '... [TRUNCATED]' : ''),
