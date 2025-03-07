@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { authenticateUser } from "../auth";
 import { RateLimiterMode } from "../../types";
 import { Logger } from "../../lib/logger";
-import { getCrawl, saveCrawl } from "../../lib/crawl-redis";
+import { getCrawl, saveCrawl } from "../../lib/crawl-firestore";
 import { configDotenv } from "dotenv";
 configDotenv();
 

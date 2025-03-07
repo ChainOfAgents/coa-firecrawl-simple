@@ -1,24 +1,21 @@
-import { redisConnection } from "../../src/services/queue-service";
+import { stateManager } from "../services/state-management/firestore-state";
 import { PlanType } from "../../src/types";
 import { Logger } from "./logger";
 
 // Default team ID for system-generated requests
 const DEFAULT_TEAM_ID = 'system';
-const SET_KEY_PREFIX = "limit_team_id:";
+const COLLECTION_PREFIX = "team_jobs:";
 
 export async function addJobPriority(team_id, job_id) {
   try {
     // Use default team_id if undefined
     const safeTeamId = team_id || DEFAULT_TEAM_ID;
-    const setKey = SET_KEY_PREFIX + safeTeamId;
-
-    // Add scrape job id to the set
-    await redisConnection.sadd(setKey, job_id);
-
-    // This approach will reset the expiration time to 60 seconds every time a new job is added to the set.
-    await redisConnection.expire(setKey, 60);
+    
+    // Add job to Firestore
+    await stateManager.addTeamJob(safeTeamId, job_id);
+    Logger.debug(`Added job ${job_id} to team ${safeTeamId} priority tracking`);
   } catch (e) {
-    Logger.error(`Add job priority (sadd) failed: ${team_id}, ${job_id}`);
+    Logger.error(`Add job priority failed: ${team_id}, ${job_id}: ${e}`);
   }
 }
 
@@ -26,12 +23,12 @@ export async function deleteJobPriority(team_id, job_id) {
   try {
     // Use default team_id if undefined
     const safeTeamId = team_id || DEFAULT_TEAM_ID;
-    const setKey = SET_KEY_PREFIX + safeTeamId;
-
-    // remove job_id from the set
-    await redisConnection.srem(setKey, job_id);
+    
+    // Remove job from Firestore
+    await stateManager.removeTeamJob(safeTeamId, job_id);
+    Logger.debug(`Removed job ${job_id} from team ${safeTeamId} priority tracking`);
   } catch (e) {
-    Logger.error(`Delete job priority (srem) failed: ${team_id}, ${job_id}`);
+    Logger.error(`Delete job priority failed: ${team_id}, ${job_id}: ${e}`);
   }
 }
 
@@ -47,60 +44,61 @@ export async function getJobPriority({
   try {
     // Use default team_id if undefined
     const safeTeamId = team_id || DEFAULT_TEAM_ID;
-    const setKey = SET_KEY_PREFIX + safeTeamId;
+    
+    // Get team job count from Firestore
+    const jobCount = await stateManager.getTeamJobCount(safeTeamId);
+    Logger.debug(`Team ${safeTeamId} has ${jobCount} active jobs`);
 
-    // Get the length of the set
-    let setLength = 0;
-    try {
-      setLength = await redisConnection.scard(setKey);
-    } catch (redisError) {
-      Logger.error(`Redis error in getJobPriority: ${redisError}`);
-      // Continue with setLength = 0 if Redis fails
+    // Base priority is 10, lower is higher priority
+    let priority = basePriority;
+
+    // Adjust priority based on plan
+    if (plan === "free") {
+      // Free plan gets lower priority as job count increases
+      if (jobCount > 10) {
+        priority = 15;
+      } else if (jobCount > 5) {
+        priority = 12;
+      }
+    } else if (plan === "starter" || plan === "hobby") {
+      // Starter/Hobby plans get slightly better priority
+      if (jobCount > 20) {
+        priority = 12;
+      } else if (jobCount > 10) {
+        priority = 10;
+      } else {
+        priority = 8;
+      }
+    } else if (plan === "standard" || plan === "standardnew") {
+      // Standard plans get good priority
+      if (jobCount > 30) {
+        priority = 8;
+      } else if (jobCount > 15) {
+        priority = 6;
+      } else {
+        priority = 5;
+      }
+    } else if (plan === "scale" || plan === "growth" || plan === "growthdouble") {
+      // Scale/Growth plans get highest priority
+      if (jobCount > 50) {
+        priority = 5;
+      } else if (jobCount > 25) {
+        priority = 3;
+      } else {
+        priority = 2;
+      }
     }
 
-    // Determine the priority based on the plan and set length
-    let planModifier = 1;
-    let bucketLimit = 0;
-
-    switch (plan) {
-      case "free":
-        bucketLimit = 25;
-        planModifier = 0.5;
-        break;
-      case "hobby":
-        bucketLimit = 100;
-        planModifier = 0.3;
-        break;
-      case "standard":
-      case "standardnew":
-        bucketLimit = 200;
-        planModifier = 0.2;
-        break;
-      case "growth":
-      case "growthdouble":
-        bucketLimit = 400;
-        planModifier = 0.1;
-        break;
-
-      default:
-        bucketLimit = 25;
-        planModifier = 1;
-        break;
+    // Special case for system team
+    if (safeTeamId === DEFAULT_TEAM_ID) {
+      // System jobs get highest priority
+      priority = 1;
     }
 
-    // if length set is smaller than set, just return base priority
-    if (setLength <= bucketLimit) {
-      return basePriority;
-    } else {
-      // If not, we keep base priority + planModifier
-      return Math.ceil(
-        basePriority + Math.ceil((setLength - bucketLimit) * planModifier)
-      );
-    }
+    return priority;
   } catch (e) {
-    Logger.error(
-      `Get job priority failed: ${team_id || 'undefined'}, ${plan || 'undefined'}, ${basePriority}`
-    );
+    Logger.error(`Get job priority failed for team ${team_id}: ${e}`);
+    // Return default priority on error
     return basePriority;
   }
 }

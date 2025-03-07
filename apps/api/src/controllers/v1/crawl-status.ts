@@ -1,6 +1,6 @@
 import { Response } from "express";
 import { CrawlStatusParams, CrawlStatusResponse, ErrorResponse, legacyDocumentConverter, RequestWithAuth } from "./types";
-import { getCrawl, getCrawlExpiry, getCrawlJobs, getDoneJobsOrdered, getDoneJobsOrderedLength } from "../../lib/crawl-redis";
+import { getCrawl, getCrawlExpiry, getCrawlJobs, getDoneJobsOrdered, getDoneJobsOrderedLength } from "../../lib/crawl-firestore";
 import { getScrapeQueue } from "../../services/queue-service";
 import { configDotenv } from "dotenv";
 configDotenv();

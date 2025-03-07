@@ -48,34 +48,57 @@ export interface CrawlState {
   failedJobs: string[];
   startTime: Date;
   endTime?: Date;
+  originUrl: string;
+  crawlerOptions: any;
+  pageOptions: any;
+  team_id: string;
+  plan: string;
+  robots?: string;
+  cancelled?: boolean;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+export interface CrawlJob {
+  url: string;
+  jobId: string;
+  status?: string;
+  error?: string;
+  timestamp?: number;
 }
 
 // Helper function to remove undefined values from an object recursively
-const removeUndefinedValues = (obj: any): any => {
-  if (obj === null || obj === undefined) {
-    return null;
-  }
-  
-  if (typeof obj !== 'object') {
+function removeUndefinedValues(obj: any): any {
+  if (obj === null || obj === undefined || typeof obj !== 'object') {
     return obj;
   }
-  
+
   if (Array.isArray(obj)) {
     return obj.map(item => removeUndefinedValues(item));
   }
-  
-  const result: Record<string, any> = {};
+
+  const result = {};
   for (const key in obj) {
-    if (obj[key] !== undefined) {
-      result[key] = removeUndefinedValues(obj[key]);
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const value = obj[key];
+      if (value !== undefined) {
+        result[key] = removeUndefinedValues(value);
+      }
     }
   }
   return result;
-};
+}
 
 export class FirestoreStateManager {
   private jobsCollection = db.collection('jobs');
   private crawlsCollection = db.collection('crawls');
+  private crawlJobsCollection = db.collection('crawl_jobs');
+  private lockedUrlsCollection = db.collection('locked_urls');
+  private teamJobsCollection = db.collection('team_jobs');
+
+  private removeUndefinedValues(obj: any): any {
+    return removeUndefinedValues(obj);
+  }
 
   async createJob(jobId: string, name: string, data: QueueJobData, options: QueueJobOptions): Promise<void> {
     try {
@@ -86,8 +109,8 @@ export class FirestoreStateManager {
       }
       
       // Clean the data by removing undefined values
-      const cleanData = removeUndefinedValues(data);
-      const cleanOptions = removeUndefinedValues(options);
+      const cleanData = this.removeUndefinedValues(data);
+      const cleanOptions = this.removeUndefinedValues(options);
       
       Logger.debug(`[STATE-MANAGER] Creating job state for ${jobId} with data: ${JSON.stringify(cleanData)}`);
       
@@ -127,7 +150,7 @@ export class FirestoreStateManager {
   async markJobCompleted(jobId: string, result: QueueJobResult): Promise<void> {
     try {
       // Clean the result by removing undefined values
-      const cleanResult = removeUndefinedValues(result);
+      const cleanResult = this.removeUndefinedValues(result);
       
       Logger.debug(`[STATE-MANAGER] Marking job ${jobId} as completed with result: ${JSON.stringify(cleanResult).substring(0, 200)}...`);
       
@@ -296,7 +319,7 @@ export class FirestoreStateManager {
   async updateJobProgress(jobId: string, progress: number | object): Promise<void> {
     try {
       // Clean the progress by removing undefined values if it's an object
-      const cleanProgress = typeof progress === 'object' ? removeUndefinedValues(progress) : progress;
+      const cleanProgress = typeof progress === 'object' ? this.removeUndefinedValues(progress) : progress;
       
       await this.jobsCollection.doc(jobId).update({
         progress: cleanProgress,
@@ -330,7 +353,6 @@ export class FirestoreStateManager {
       Logger.debug(`[STATE-MANAGER] Getting result for job ${jobId}`);
       
       const jobDoc = await this.jobsCollection.doc(jobId).get();
-      Logger.debug(`[STATE-MANAGER] Job ${jobId} document exists: ${jobDoc.exists}`);
       
       if (!jobDoc.exists) {
         Logger.error(`[STATE-MANAGER] Job ${jobId} not found when getting result`);
@@ -464,6 +486,13 @@ export class FirestoreStateManager {
         completedJobs: [],
         failedJobs: [],
         startTime: new Date(),
+        originUrl: '',
+        crawlerOptions: {},
+        pageOptions: {},
+        team_id: '',
+        plan: '',
+        createdAt: new Date(),
+        expiresAt: new Date(),
       };
 
       await this.crawlsCollection.doc(crawlId).set(crawlState);
@@ -515,6 +544,403 @@ export class FirestoreStateManager {
     } catch (error) {
       Logger.error(`[STATE-MANAGER] Error updating crawl progress for ${crawlId}: ${error}`);
       throw error;
+    }
+  }
+
+  // Crawl State Management Methods (replacing Redis-based implementation)
+
+  async saveCrawl(id: string, crawl: Omit<CrawlState, 'id' | 'status' | 'totalUrls' | 'completedUrls' | 'failedUrls' | 'urls' | 'completedJobs' | 'failedJobs' | 'startTime' | 'endTime' | 'expiresAt'>): Promise<void> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Saving crawl ${id}`);
+      
+      // Calculate expiration date (24 hours from now)
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 24);
+      
+      // Create or update the crawl document
+      const crawlData = this.removeUndefinedValues({
+        ...crawl,
+        id,
+        status: 'created',
+        totalUrls: 0,
+        completedUrls: 0,
+        failedUrls: 0,
+        urls: [],
+        completedJobs: [],
+        failedJobs: [],
+        startTime: new Date(),
+        createdAt: new Date(),
+        expiresAt,
+      });
+      
+      await this.crawlsCollection.doc(id).set(crawlData);
+      Logger.debug(`[STATE-MANAGER] Crawl ${id} saved successfully`);
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error saving crawl ${id}: ${error}`);
+      throw error;
+    }
+  }
+
+  async getCrawl(id: string): Promise<CrawlState | null> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Getting crawl ${id}`);
+      
+      const crawlDoc = await this.crawlsCollection.doc(id).get();
+      
+      if (!crawlDoc.exists) {
+        Logger.debug(`[STATE-MANAGER] Crawl ${id} not found`);
+        return null;
+      }
+      
+      return crawlDoc.data() as CrawlState;
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error getting crawl ${id}: ${error}`);
+      throw error;
+    }
+  }
+
+  async getCrawlExpiry(id: string): Promise<Date> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Getting expiry for crawl ${id}`);
+      
+      const crawlDoc = await this.crawlsCollection.doc(id).get();
+      
+      if (!crawlDoc.exists) {
+        Logger.debug(`[STATE-MANAGER] Crawl ${id} not found, returning current date`);
+        return new Date();
+      }
+      
+      const crawlData = crawlDoc.data() as CrawlState;
+      return crawlData.expiresAt;
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error getting crawl expiry ${id}: ${error}`);
+      throw error;
+    }
+  }
+
+  async addCrawlJob(id: string, jobId: string): Promise<void> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Adding job ${jobId} to crawl ${id}`);
+      
+      // Add the job ID to the crawl's urls array
+      await this.crawlsCollection.doc(id).update({
+        urls: FieldValue.arrayUnion(jobId)
+      });
+      
+      // Create a crawl job document
+      await this.crawlJobsCollection.doc(`${id}_${jobId}`).set({
+        crawlId: id,
+        jobId,
+        status: 'created',
+        timestamp: Date.now()
+      });
+      
+      Logger.debug(`[STATE-MANAGER] Job ${jobId} added to crawl ${id}`);
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error adding job ${jobId} to crawl ${id}: ${error}`);
+      throw error;
+    }
+  }
+
+  async addCrawlJobs(id: string, jobIds: string[]): Promise<void> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Adding ${jobIds.length} jobs to crawl ${id}`);
+      
+      // Add the job IDs to the crawl's urls array
+      await this.crawlsCollection.doc(id).update({
+        urls: FieldValue.arrayUnion(...jobIds)
+      });
+      
+      // Create batch operations for adding crawl jobs
+      const batch = db.batch();
+      
+      for (const jobId of jobIds) {
+        const docRef = this.crawlJobsCollection.doc(`${id}_${jobId}`);
+        batch.set(docRef, {
+          crawlId: id,
+          jobId,
+          status: 'created',
+          timestamp: Date.now()
+        });
+      }
+      
+      await batch.commit();
+      Logger.debug(`[STATE-MANAGER] ${jobIds.length} jobs added to crawl ${id}`);
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error adding jobs to crawl ${id}: ${error}`);
+      throw error;
+    }
+  }
+
+  async addCrawlJobDone(id: string, jobId: string): Promise<void> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Marking job ${jobId} as done for crawl ${id}`);
+      
+      // Update the crawl job status
+      await this.crawlJobsCollection.doc(`${id}_${jobId}`).update({
+        status: 'completed',
+        timestamp: Date.now()
+      });
+      
+      // Add the job ID to the crawl's completedJobs array
+      await this.crawlsCollection.doc(id).update({
+        completedJobs: FieldValue.arrayUnion(jobId),
+        completedUrls: FieldValue.increment(1)
+      });
+      
+      Logger.debug(`[STATE-MANAGER] Job ${jobId} marked as done for crawl ${id}`);
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error marking job ${jobId} as done for crawl ${id}: ${error}`);
+      throw error;
+    }
+  }
+
+  async getDoneJobsOrderedLength(id: string): Promise<number> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Getting completed jobs count for crawl ${id}`);
+      
+      const crawlDoc = await this.crawlsCollection.doc(id).get();
+      
+      if (!crawlDoc.exists) {
+        Logger.debug(`[STATE-MANAGER] Crawl ${id} not found, returning 0`);
+        return 0;
+      }
+      
+      const crawlData = crawlDoc.data() as CrawlState;
+      return crawlData.completedJobs.length;
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error getting completed jobs count for crawl ${id}: ${error}`);
+      throw error;
+    }
+  }
+
+  async getDoneJobsOrdered(id: string, start = 0, end = -1): Promise<string[]> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Getting completed jobs for crawl ${id} from ${start} to ${end}`);
+      
+      const crawlDoc = await this.crawlsCollection.doc(id).get();
+      
+      if (!crawlDoc.exists) {
+        Logger.debug(`[STATE-MANAGER] Crawl ${id} not found, returning empty array`);
+        return [];
+      }
+      
+      const crawlData = crawlDoc.data() as CrawlState;
+      const completedJobs = crawlData.completedJobs;
+      
+      // Handle negative end index
+      const actualEnd = end < 0 ? completedJobs.length : end;
+      
+      return completedJobs.slice(start, actualEnd);
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error getting completed jobs for crawl ${id}: ${error}`);
+      throw error;
+    }
+  }
+
+  async isCrawlFinished(id: string): Promise<boolean> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Checking if crawl ${id} is finished`);
+      
+      const crawlDoc = await this.crawlsCollection.doc(id).get();
+      
+      if (!crawlDoc.exists) {
+        Logger.debug(`[STATE-MANAGER] Crawl ${id} not found, returning true`);
+        return true;
+      }
+      
+      const crawlData = crawlDoc.data() as CrawlState;
+      const isFinished = crawlData.totalUrls > 0 && 
+                         (crawlData.completedUrls + crawlData.failedUrls) >= crawlData.totalUrls;
+      
+      Logger.debug(`[STATE-MANAGER] Crawl ${id} finished: ${isFinished}`);
+      return isFinished;
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error checking if crawl ${id} is finished: ${error}`);
+      throw error;
+    }
+  }
+
+  async finishCrawl(id: string): Promise<void> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Finishing crawl ${id}`);
+      
+      await this.crawlsCollection.doc(id).update({
+        status: 'completed',
+        endTime: new Date()
+      });
+      
+      Logger.debug(`[STATE-MANAGER] Crawl ${id} marked as finished`);
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error finishing crawl ${id}: ${error}`);
+      throw error;
+    }
+  }
+
+  async getCrawlJobs(crawlId: string): Promise<CrawlJob[]> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Getting jobs for crawl ${crawlId}`);
+      
+      const snapshot = await this.crawlJobsCollection
+        .where('crawlId', '==', crawlId)
+        .get();
+      
+      if (snapshot.empty) {
+        Logger.debug(`[STATE-MANAGER] No jobs found for crawl ${crawlId}`);
+        return [];
+      }
+      
+      const jobs: CrawlJob[] = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        jobs.push({
+          url: data.url || '',
+          jobId: data.jobId,
+          status: data.status,
+          error: data.error,
+          timestamp: data.timestamp
+        });
+      });
+      
+      return jobs;
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error getting jobs for crawl ${crawlId}: ${error}`);
+      throw error;
+    }
+  }
+
+  async lockURL(url: string, crawlId: string): Promise<boolean> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Attempting to lock URL ${url} for crawl ${crawlId}`);
+      
+      // Check if URL is already locked
+      const urlDoc = await this.lockedUrlsCollection.doc(this.hashUrl(url)).get();
+      
+      if (urlDoc.exists) {
+        Logger.debug(`[STATE-MANAGER] URL ${url} is already locked`);
+        return false;
+      }
+      
+      // Lock the URL
+      await this.lockedUrlsCollection.doc(this.hashUrl(url)).set({
+        url,
+        crawlId,
+        timestamp: Date.now(),
+        // Set TTL for 24 hours
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+      });
+      
+      Logger.debug(`[STATE-MANAGER] URL ${url} locked successfully for crawl ${crawlId}`);
+      return true;
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error locking URL ${url} for crawl ${crawlId}: ${error}`);
+      return false;
+    }
+  }
+
+  async lockURLs(id: string, urls: string[]): Promise<boolean> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Attempting to lock ${urls.length} URLs for crawl ${id}`);
+      
+      // Create batch operations for locking URLs
+      const batch = db.batch();
+      const now = Date.now();
+      const expiresAt = new Date(now + 24 * 60 * 60 * 1000);
+      
+      for (const url of urls) {
+        const docRef = this.lockedUrlsCollection.doc(this.hashUrl(url));
+        batch.set(docRef, {
+          url,
+          crawlId: id,
+          timestamp: now,
+          expiresAt
+        });
+      }
+      
+      await batch.commit();
+      Logger.debug(`[STATE-MANAGER] ${urls.length} URLs locked successfully for crawl ${id}`);
+      return true;
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error locking URLs for crawl ${id}: ${error}`);
+      return false;
+    }
+  }
+
+  // Helper method to hash URLs for use as document IDs
+  private hashUrl(url: string): string {
+    // Simple hash function for URL
+    let hash = 0;
+    for (let i = 0; i < url.length; i++) {
+      const char = url.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return `url_${Math.abs(hash).toString(16)}`;
+  }
+
+  /**
+   * Add a job to a team's active jobs
+   * @param teamId Team ID
+   * @param jobId Job ID
+   */
+  async addTeamJob(teamId: string, jobId: string): Promise<void> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Adding job ${jobId} to team ${teamId}`);
+      
+      await this.teamJobsCollection.doc(`${teamId}_${jobId}`).set({
+        teamId,
+        jobId,
+        timestamp: Date.now(),
+        // Set TTL for 10 minutes
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+      });
+      
+      Logger.debug(`[STATE-MANAGER] Job ${jobId} added to team ${teamId}`);
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error adding job ${jobId} to team ${teamId}: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove a job from a team's active jobs
+   * @param teamId Team ID
+   * @param jobId Job ID
+   */
+  async removeTeamJob(teamId: string, jobId: string): Promise<void> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Removing job ${jobId} from team ${teamId}`);
+      
+      await this.teamJobsCollection.doc(`${teamId}_${jobId}`).delete();
+      
+      Logger.debug(`[STATE-MANAGER] Job ${jobId} removed from team ${teamId}`);
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error removing job ${jobId} from team ${teamId}: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the number of active jobs for a team
+   * @param teamId Team ID
+   * @returns Number of active jobs
+   */
+  async getTeamJobCount(teamId: string): Promise<number> {
+    try {
+      Logger.debug(`[STATE-MANAGER] Getting job count for team ${teamId}`);
+      
+      const snapshot = await this.teamJobsCollection
+        .where('teamId', '==', teamId)
+        .where('expiresAt', '>', new Date())
+        .get();
+      
+      const count = snapshot.size;
+      Logger.debug(`[STATE-MANAGER] Team ${teamId} has ${count} active jobs`);
+      
+      return count;
+    } catch (error) {
+      Logger.error(`[STATE-MANAGER] Error getting job count for team ${teamId}: ${error}`);
+      return 0;
     }
   }
 }

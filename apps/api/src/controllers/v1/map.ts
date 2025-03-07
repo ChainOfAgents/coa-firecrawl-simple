@@ -5,7 +5,7 @@ import {
   mapRequestSchema,
   RequestWithAuth,
 } from "./types";
-import { crawlToCrawler, StoredCrawl } from "../../lib/crawl-redis";
+import { crawlToCrawler, StoredCrawl } from "../../lib/crawl-firestore";
 import { MapResponse, MapRequest } from "./types";
 import { configDotenv } from "dotenv";
 import {
@@ -65,11 +65,12 @@ export async function mapController(
   let links: string[] = [req.body.url];
 
   const sc: StoredCrawl = {
+    id,
     originUrl: req.body.url,
     crawlerOptions: legacyCrawlerOptions(req.body),
     pageOptions: {},
     team_id: req.auth.team_id,
-    createdAt: Date.now(),
+    createdAt: new Date(),
     plan: req.auth.plan,
   };
 

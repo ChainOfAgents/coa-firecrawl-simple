@@ -13,7 +13,6 @@ import { v4 as uuidv4 } from "uuid";
 import { addScrapeJobRaw, waitForJob } from "../../services/queue-jobs";
 import { getJobPriority } from "../../lib/job-priority";
 import { PlanType } from "../../types";
-import { redisRateLimitClient } from "../../services/rate-limiter";
 
 // Default team ID for system-generated requests
 const DEFAULT_TEAM_ID = 'system';

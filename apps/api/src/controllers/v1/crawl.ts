@@ -9,14 +9,16 @@ import {
   RequestWithAuth,
 } from "./types";
 import {
+  saveCrawl,
+  generateCrawlId,
   addCrawlJob,
-  addCrawlJobs,
-  crawlToCrawler,
+  getCrawl,
   lockURL,
   lockURLs,
-  saveCrawl,
+  finishCrawl,
+  crawlToCrawler,
   StoredCrawl,
-} from "../../lib/crawl-redis";
+} from "../../lib/crawl-firestore";
 import { getScrapeQueue } from "../../services/queue-service";
 import { addScrapeJobRaw } from "../../services/queue-jobs";
 import { Logger } from "../../lib/logger";
@@ -121,11 +123,12 @@ export async function crawlController(
   }
 
   const sc: StoredCrawl = {
+    id,
     originUrl: req.body.url,
     crawlerOptions,
     pageOptions,
     team_id: req.auth.team_id,
-    createdAt: Date.now(),
+    createdAt: new Date(),
     plan: req.auth.plan,
   };
 
@@ -189,10 +192,12 @@ export async function crawlController(
       id,
       jobs.map((x) => x.data.url)
     );
-    await addCrawlJobs(
-      id,
-      jobs.map((x) => x.opts.jobId)
-    );
+    
+    // Add each job individually instead of using addCrawlJobs
+    for (const job of jobs.map((x) => x.opts.jobId)) {
+      await addCrawlJob(id, job);
+    }
+    
     await getScrapeQueue().addBulk(jobs);
   } else {
     const jobId = uuidv4();
@@ -213,7 +218,7 @@ export async function crawlController(
       15
     );
     await addCrawlJob(id, jobId);
-    await lockURL(req.body.url, id, sc);
+    await lockURL(req.body.url, id);
 
     const protocol = process.env.ENV === "local" ? req.protocol : "https";
 

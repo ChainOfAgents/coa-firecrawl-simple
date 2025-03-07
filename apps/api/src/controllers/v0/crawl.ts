@@ -11,14 +11,16 @@ import {
 import { v4 as uuidv4 } from "uuid";
 import { Logger } from "../../../src/lib/logger";
 import {
+  saveCrawl,
+  generateCrawlId,
   addCrawlJob,
-  addCrawlJobs,
-  crawlToCrawler,
+  getCrawl,
   lockURL,
   lockURLs,
-  saveCrawl,
+  finishCrawl,
+  crawlToCrawler,
   StoredCrawl,
-} from "../../../src/lib/crawl-redis";
+} from "../../../src/lib/crawl-firestore";
 import { getScrapeQueue } from "../../../src/services/queue-service";
 import { checkAndUpdateURL } from "../../../src/lib/validateUrl";
 import { getJobPriority } from "../../lib/job-priority";
@@ -87,12 +89,13 @@ export async function crawlController(req: Request, res: Response) {
     const id = uuidv4();
 
     const sc: StoredCrawl = {
+      id,
       originUrl: url,
       crawlerOptions,
       pageOptions,
       team_id,
       plan,
-      createdAt: Date.now(),
+      createdAt: new Date(),
     };
 
     const crawler = crawlToCrawler(id, sc);
@@ -144,10 +147,11 @@ export async function crawlController(req: Request, res: Response) {
         id,
         jobs.map((x) => x.data.url)
       );
-      await addCrawlJobs(
-        id,
-        jobs.map((x) => x.opts.jobId)
-      );
+      
+      // Add each job individually instead of using addCrawlJobs
+      for (const job of jobs.map((x) => x.opts.jobId)) {
+        await addCrawlJob(id, job);
+      }
 
       await getScrapeQueue().addBulk(jobs);
     } else {
@@ -168,7 +172,7 @@ export async function crawlController(req: Request, res: Response) {
         10
       );
       await addCrawlJob(id, jobId);
-      await lockURL(url, id, sc);
+      await lockURL(url, id);
     }
 
     res.json({ jobId: id });

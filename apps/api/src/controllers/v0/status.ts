@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { authenticateUser } from "../auth";
 import { getScrapeQueue } from "../../services/queue-service";
-import { getCrawl, getCrawlJobs } from "../../lib/crawl-redis";
+import { getCrawl, getCrawlJobs } from "../../lib/crawl-firestore";
 import { Logger } from "../../lib/logger";
 import { getJobs } from "../../controllers/v1/crawl-status";
 import { RateLimiterMode } from "../../types";

@@ -2,7 +2,6 @@ import "dotenv/config";
 import { CustomError } from "../lib/custom-error";
 import {
   getScrapeQueue,
-  redisConnection,
   SCRAPE_QUEUE_NAME,
 } from "./queue-service";
 import { logtail } from "./logtail";
@@ -18,8 +17,8 @@ import {
   getCrawl,
   getCrawlJobs,
   lockURL,
-} from "../lib/crawl-redis";
-import { StoredCrawl, CrawlJob } from "../lib/crawl-redis";
+} from "../lib/crawl-firestore";
+import { StoredCrawl, CrawlJob } from "../lib/crawl-firestore";
 import { addScrapeJobRaw } from "./queue-jobs";
 import {
   addJobPriority,
@@ -235,7 +234,7 @@ async function processCrawlLinks(job: QueueJob, docs: any[], sc: StoredCrawl) {
     for (const url of newLinks) {
       try {
         // Check if URL is locked (being processed by another crawler)
-        const isLocked = await lockURL(url, job.data.crawl_id, sc);
+        const isLocked = await lockURL(url, job.data.crawl_id);
         if (!isLocked) {
           Logger.debug(`[Job ${job.id}] URL ${url} is already being processed, skipping`);
           continue;

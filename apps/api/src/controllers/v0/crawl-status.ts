@@ -3,7 +3,7 @@ import { authenticateUser } from "../auth";
 import { RateLimiterMode } from "../../../src/types";
 import { getScrapeQueue } from "../../../src/services/queue-service";
 import { Logger } from "../../../src/lib/logger";
-import { getCrawl, getCrawlJobs } from "../../../src/lib/crawl-redis";
+import { getCrawl, getCrawlJobs } from "../../../src/lib/crawl-firestore";
 import { configDotenv } from "dotenv";
 configDotenv();
 

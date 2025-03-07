@@ -4,12 +4,16 @@ import { RateLimiterMode } from "../../../src/types";
 import { v4 as uuidv4 } from "uuid";
 import { Logger } from "../../../src/lib/logger";
 import {
-  addCrawlJob,
-  crawlToCrawler,
-  lockURL,
   saveCrawl,
+  generateCrawlId,
+  addCrawlJob,
+  getCrawl,
+  lockURL,
+  lockURLs,
+  finishCrawl,
+  crawlToCrawler,
   StoredCrawl,
-} from "../../../src/lib/crawl-redis";
+} from "../../../src/lib/crawl-firestore";
 import { addScrapeJobRaw, waitForJob } from "../../../src/services/queue-jobs";
 import { checkAndUpdateURL } from "../../../src/lib/validateUrl";
 
@@ -55,13 +59,14 @@ export async function crawlPreviewController(req: Request, res: Response) {
     } catch (_) {}
 
     const sc: StoredCrawl = {
+      id,
       originUrl: url,
       crawlerOptions,
       pageOptions,
       team_id,
       plan,
       robots,
-      createdAt: Date.now(),
+      createdAt: new Date(),
     };
 
     await saveCrawl(id, sc);
@@ -92,7 +97,7 @@ export async function crawlPreviewController(req: Request, res: Response) {
           10
         );
         await addCrawlJob(id, jobId);
-        await lockURL(url, id, sc);
+        await lockURL(url, id);
       }
     } else {
       const jobId = uuidv4();
@@ -111,7 +116,7 @@ export async function crawlPreviewController(req: Request, res: Response) {
         10
       );
       await addCrawlJob(id, jobId);
-      await lockURL(url, id, sc);
+      await lockURL(url, id);
     }
 
     res.json({ jobId: id });
