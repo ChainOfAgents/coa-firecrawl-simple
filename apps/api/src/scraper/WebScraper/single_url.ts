@@ -7,6 +7,7 @@ import { urlSpecificParams } from "./utils/custom/website_params";
 import { removeUnwantedElements } from "./utils/removeUnwantedElements";
 import { scrapeWithFetch } from "./scrapers/fetch";
 import { scrapeWithPlaywright } from "./scrapers/playwright";
+import { scrapeWithUlixee } from "./scrapers/ulixee";
 import { extractLinks } from "./utils/utils";
 import { Logger } from "../../lib/logger";
 import { clientSideError } from "../../strings";
@@ -51,7 +52,7 @@ export const callWebhook = async (
   }
 };
 
-export const baseScrapers = ["playwright", "fetch"].filter(Boolean);
+export const baseScrapers = ["playwright", "ulixee", "fetch"].filter(Boolean);
 
 export async function generateRequestParams(
   url: string,
@@ -92,12 +93,14 @@ function getScrapingFallbackOrder(defaultScraper?: string) {
     switch (scraper) {
       case "playwright":
         return !!process.env.PLAYWRIGHT_MICROSERVICE_URL;
+      case "ulixee":
+        return !!process.env.ULIXEE_MICROSERVICE_URL;
       default:
         return true;
     }
   });
 
-  let defaultOrder = ["playwright", "fetch"].filter(Boolean);
+  let defaultOrder = ["playwright", "ulixee", "fetch"].filter(Boolean);
 
   const filteredDefaultOrder = defaultOrder.filter(
     (scraper: (typeof baseScrapers)[number]) =>
@@ -160,6 +163,18 @@ export async function scrapeSingleUrl(
       case "playwright":
         if (process.env.PLAYWRIGHT_MICROSERVICE_URL) {
           const response = await scrapeWithPlaywright(
+            url,
+            pageOptions.waitFor,
+            pageOptions.headers,
+          );
+          scraperResponse.text = response.content;
+          scraperResponse.metadata.pageStatusCode = response.pageStatusCode;
+          scraperResponse.metadata.pageError = response.pageError;
+        }
+        break;
+      case "ulixee":
+        if (process.env.ULIXEE_MICROSERVICE_URL) {
+          const response = await scrapeWithUlixee(
             url,
             pageOptions.waitFor,
             pageOptions.headers,

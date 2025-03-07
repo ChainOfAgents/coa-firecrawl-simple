@@ -41,7 +41,7 @@ steps:
           --min-instances=0 \
           --max-instances=10 \
           --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
-          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,PLAYWRIGHT_MICROSERVICE_URL=https://ulixee-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app/scrape,LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks-queue,CLOUD_TASKS_SERVICE_URL=https://worker-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app,CLOUD_TASKS_SERVICE_ACCOUNT_EMAIL=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com"
+          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks-queue,CLOUD_TASKS_SERVICE_URL=https://worker-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app,CLOUD_TASKS_SERVICE_ACCOUNT_EMAIL=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com"
         
         echo "API service deployed successfully."
         
@@ -59,7 +59,7 @@ steps:
           --min-instances=1 \
           --max-instances=5 \
           --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
-          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,PLAYWRIGHT_MICROSERVICE_URL=https://ulixee-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app/scrape,LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks-queue,CLOUD_TASKS_SERVICE_URL=https://worker-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app,CLOUD_TASKS_SERVICE_ACCOUNT_EMAIL=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com"
+          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,PLAYWRIGHT_MICROSERVICE_URL=https://playwright-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app/scrape,ULIXEE_MICROSERVICE_URL=https://ulixee-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app/scrape,LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks-queue,CLOUD_TASKS_SERVICE_ACCOUNT_EMAIL=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com"
         
         echo "Worker service deployed successfully."
         
