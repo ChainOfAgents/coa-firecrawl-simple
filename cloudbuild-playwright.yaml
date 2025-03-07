@@ -1,0 +1,60 @@
+steps:
+  # Build the playwright service image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      [
+        'build',
+        '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:${_TAG}',
+        '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:latest',
+        '-f', 'apps/playwright-service-ts/Dockerfile',
+        'apps/playwright-service-ts'
+      ]
+    
+  # Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:${_TAG}']
+    
+  # Push the latest tag
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:latest']
+    
+  # Deploy playwright service to Cloud Run and store URL
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # Deploy playwright service to Cloud Run
+        gcloud run deploy playwright-service-firecrawl-simple \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:${_TAG} \
+          --platform=managed \
+          --region=${_REGION} \
+          --cpu=1 \
+          --memory=2Gi \
+          --concurrency=80 \
+          --timeout=300s \
+          --min-instances=1 \
+          --max-instances=10 \
+          --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
+          --command="node" --args="dist/api.js" \
+          --port=8080 \
+          --set-env-vars="NODE_ENV=production,PROXY_URL=,PROXY_USERNAME=,PROXY_PASSWORD=,RUNNING_IN_CLOUD=true,CHROME_SANDBOX=false,MAX_CONCURRENT_BROWSERS=10,NODE_OPTIONS=--max-old-space-size=2048" \
+
+        # Save the URL of the deployed playwright service for other builds
+        SERVICE_URL=$(gcloud run services describe playwright-service-firecrawl-simple --platform=managed --region=${_REGION} --format='value(status.url)')
+        echo "$${SERVICE_URL}/scrape" > /workspace/playwright-service-url.txt
+        gsutil cp /workspace/playwright-service-url.txt gs://${PROJECT_ID}-build-artifacts/playwright-service-url.txt
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:${_TAG}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:latest'
+  
+substitutions:
+  _TAG: v1
+  _REGION: us-west2
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+  
+tags: ['playwright-service', 'web-scraper', 'firecrawl-simple']
