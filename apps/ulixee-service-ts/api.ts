@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { Logger } from "./lib/logger";
 
 dotenv.config();
 
@@ -42,24 +43,23 @@ if (proxyUrl && proxyUsername && proxyPassword) {
 const chromePath = process.env.CHROME_PATH || '';
 const noChromeSandbox = process.env.CHROME_SANDBOX === 'false';
 
-console.log(`Chrome path: ${chromePath || 'Using default'}`);
-console.log(`Chrome sandbox disabled: ${noChromeSandbox}`);
+Logger.info(`Chrome configuration - Path: ${chromePath || 'Using default'}, Sandbox disabled: ${noChromeSandbox}`);
 
 const app = express();
 // Use the PORT environment variable provided by Cloud Run
 const port = process.env.PORT || 8080;
-console.log(`Starting server on port ${port}`);
+Logger.info(`Starting server on port ${port}`);
 
 app.use(bodyParser.json());
 
 // Initialize the hero pool
 const initializeHeroPool = async (): Promise<void> => {
   if (isPoolInitialized) {
-    console.log("Hero pool already initialized");
+    Logger.info("Hero pool already initialized");
     return;
   }
   
-  console.log(`Initializing hero pool with ${HERO_POOL_SIZE} instances`);
+  Logger.info(`Initializing hero pool with ${HERO_POOL_SIZE} instances`);
   
   try {
     // Create initial instances - start with more instances to pre-warm the pool
@@ -72,23 +72,23 @@ const initializeHeroPool = async (): Promise<void> => {
     
     await Promise.all(promises);
     isPoolInitialized = true;
-    console.log(`Hero pool initialized with ${heroPool.length} instances`);
+    Logger.info(`Hero pool initialized with ${heroPool.length} instances`);
     
     // Set up periodic cleanup to prevent memory leaks
     setInterval(() => {
-      console.log(`Running pool maintenance. Current pool size: ${heroPool.length}`);
+      Logger.info(`Running pool maintenance. Current pool size: ${heroPool.length}`);
       // Remove any stale instances that might be causing memory leaks
       if (heroPool.length > 0) {
         const instance = heroPool.pop();
         if (instance) {
-          instance.close().catch(e => console.error('Error closing hero during maintenance:', e));
+          instance.close().catch(e => Logger.error('Error closing hero during maintenance:', e));
           // Create a fresh instance to replace it
-          createHeroInstance().catch(e => console.error('Failed to create replacement hero during maintenance:', e));
+          createHeroInstance().catch(e => Logger.error('Failed to create replacement hero during maintenance:', e));
         }
       }
     }, 30 * 60 * 1000); // Run every 30 minutes
   } catch (error) {
-    console.error("Error initializing hero pool:", error);
+    Logger.error("Error initializing hero pool:", error);
     throw error;
   }
 };
@@ -101,7 +101,7 @@ async function getHeroInstance(proxy_url?: string): Promise<{ hero: Hero; releas
   }
   
   try {
-    console.log(`Getting Hero instance. Pool size: ${heroPool.length}, Busy: ${busyHeroes}`);
+    Logger.info(`Getting Hero instance. Pool size: ${heroPool.length}, Busy: ${busyHeroes}`);
     
     // First try to get from the pool
     if (heroPool.length > 0) {
@@ -118,12 +118,12 @@ async function getHeroInstance(proxy_url?: string): Promise<{ hero: Hero; releas
               hero.sessionId;
               heroPool.push(hero);
             } catch (e) {
-              console.log('Hero instance disconnected, not returning to pool');
+              Logger.info('Hero instance disconnected, not returning to pool');
               // Create a new instance to replace it
-              createHeroInstance().catch(e => console.error('Failed to create replacement hero:', e));
+              createHeroInstance().catch(e => Logger.error('Failed to create replacement hero:', e));
             }
           } catch (error) {
-            console.error('Error releasing hero:', error);
+            Logger.error('Error releasing hero:', error);
           } finally {
             busyHeroes -= 1;
           }
@@ -133,13 +133,13 @@ async function getHeroInstance(proxy_url?: string): Promise<{ hero: Hero; releas
     
     // If no instances in the pool and we're at max capacity, wait for one to be released
     if (busyHeroes >= HERO_POOL_SIZE) {
-      console.log('Waiting for a hero instance to be released...');
+      Logger.info('Waiting for a hero instance to be released...');
       await new Promise(resolve => setTimeout(resolve, 1000));
       return getHeroInstance(proxy_url);
     }
     
     // Otherwise create a new instance
-    console.log('Creating new Hero instance');
+    Logger.info('Creating new Hero instance');
     busyHeroes += 1;
     
     // Create hero with proxy if provided
@@ -195,19 +195,19 @@ async function getHeroInstance(proxy_url?: string): Promise<{ hero: Hero; releas
             hero.sessionId;
             heroPool.push(hero);
           } catch (e) {
-            console.log('New hero instance disconnected, not adding to pool');
+            Logger.info('New hero instance disconnected, not adding to pool');
             // Create a new instance to replace it
-            createHeroInstance().catch(e => console.error('Failed to create replacement hero:', e));
+            createHeroInstance().catch(e => Logger.error('Failed to create replacement hero:', e));
           }
         } catch (error) {
-          console.error('Error releasing hero:', error);
+          Logger.error('Error releasing hero:', error);
         } finally {
           busyHeroes -= 1;
         }
       }
     };
   } catch (error) {
-    console.error('Error getting hero instance:', error);
+    Logger.error('Error getting hero instance:', error);
     busyHeroes -= 1;
     throw error;
   }
@@ -256,9 +256,9 @@ async function createHeroInstance(): Promise<void> {
     
     const hero = new Hero(heroOptions);
     heroPool.push(hero);
-    console.log(`Added new hero to pool. Pool size: ${heroPool.length}`);
+    Logger.info(`Added new hero to pool. Pool size: ${heroPool.length}`);
   } catch (error) {
-    console.error('Error creating hero instance:', error);
+    Logger.error('Error creating hero instance:', error);
   }
 }
 
@@ -280,7 +280,7 @@ const validateUrl = (req: Request, res: Response, next: Function) => {
 app.post("/scrape", validateUrl, async (req: Request, res: Response) => {
   const { url, timeout = 30000, proxy_url, headers = {}, cookies = [], waitForSelector, additionalWaitTime = 0, blockResources = true } = req.body;
   
-  console.log(`Scraping ${url}`);
+  Logger.info(`Scraping ${url}`);
   const startTime = Date.now();
   
   let heroInstance: Hero | null = null;
@@ -312,7 +312,7 @@ app.post("/scrape", validateUrl, async (req: Request, res: Response) => {
             // First try to remove any existing cookie with the same name
             await cookieStorage.removeItem(cookie.name).catch(() => {
               // Ignore errors when removing cookies that don't exist
-              console.debug(`No existing cookie found for ${cookie.name}`);
+              Logger.debug(`No existing cookie found for ${cookie.name}`);
             });
             
             // Then add the new cookie
@@ -326,10 +326,10 @@ app.post("/scrape", validateUrl, async (req: Request, res: Response) => {
                 sameSite: cookie.sameSite as any || 'Lax'
               }
             ).catch(err => {
-              console.warn(`Failed to set cookie ${cookie.name}:`, err);
+              Logger.warn(`Failed to set cookie ${cookie.name}:`, err);
             });
           } catch (cookieError) {
-            console.warn(`Failed to set cookie ${cookie.name}:`, cookieError);
+            Logger.warn(`Failed to set cookie ${cookie.name}:`, cookieError);
             // Continue even if cookie setting fails
           }
         }
@@ -342,7 +342,7 @@ app.post("/scrape", validateUrl, async (req: Request, res: Response) => {
             const resourceType = resource.type;
             if (resourceType === 'Image' || resourceType === 'Font' || resourceType === 'Stylesheet' || resourceType === 'Media') {
               // Just log the resource type - we can't directly block it
-              console.debug(`Detected resource of type: ${resourceType} - ${resource.url}`);
+              Logger.debug(`Detected resource of type: ${resourceType} - ${resource.url}`);
             }
           }
         });
@@ -365,7 +365,7 @@ app.post("/scrape", validateUrl, async (req: Request, res: Response) => {
             waitForVisible: true 
           });
         } catch (err) {
-          console.log(`Selector ${waitForSelector} not found within timeout`);
+          Logger.info(`Selector ${waitForSelector} not found within timeout`);
         }
       }
       
@@ -384,7 +384,7 @@ app.post("/scrape", validateUrl, async (req: Request, res: Response) => {
         ]);
       } catch (stabilizeError) {
         // If waiting for painting stable fails, log and continue anyway
-        console.warn(`Page stabilization timed out for ${url}: ${stabilizeError.message}`);
+        Logger.warn(`Page stabilization timed out for ${url}: ${stabilizeError.message}`);
         // Give the page a bit more time anyway
         await tab.waitForMillis(2000);
       }
@@ -397,7 +397,7 @@ app.post("/scrape", validateUrl, async (req: Request, res: Response) => {
       
       // Return the result
       const endTime = Date.now();
-      console.log(`Scraping completed in ${endTime - startTime}ms`);
+      Logger.info(`Scraping completed in ${endTime - startTime}ms`);
       
       // Release the hero instance back to the pool
       if (release) release();
@@ -412,7 +412,7 @@ app.post("/scrape", validateUrl, async (req: Request, res: Response) => {
         }
       });
     } catch (error: unknown) {
-      console.error(`Error during scraping (attempt ${retries + 1}/${maxRetries}):`, error);
+      Logger.error(`Error during scraping (attempt ${retries + 1}/${maxRetries}):`, error);
       
       // Try to capture more context about the error
       let errorContext = {};
@@ -431,15 +431,15 @@ app.post("/scrape", validateUrl, async (req: Request, res: Response) => {
           }
         }
       } catch (contextError) {
-        console.warn('Failed to capture error context:', contextError);
+        Logger.warn('Failed to capture error context:', contextError);
       }
       
       // Close the current hero instance if it failed
       if (heroInstance) {
         try {
-          await heroInstance.close().catch(e => console.error("Error closing hero:", e));
+          await heroInstance.close().catch(e => Logger.error("Error closing hero:", e));
         } catch (closeError) {
-          console.error("Error during hero close:", closeError);
+          Logger.error("Error during hero close:", closeError);
         }
       }
       
@@ -459,7 +459,7 @@ app.post("/scrape", validateUrl, async (req: Request, res: Response) => {
       }
       
       // Wait before retrying
-      console.log(`Retrying in 1 second... (attempt ${retries}/${maxRetries})`);
+      Logger.info(`Retrying in 1 second... (attempt ${retries}/${maxRetries})`);
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
@@ -474,29 +474,29 @@ app.get("/health", (req: Request, res: Response) => {
 
 // Start the server
 app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  Logger.info(`Server is running on port ${port}`);
 });
 
 // Handle shutdown gracefully
 process.on('SIGINT', async () => {
-  console.log('Shutting down server...');
+  Logger.info('Shutting down server...');
   // Close all hero instances
   for (const hero of heroPool) {
-    await hero.close().catch(console.error);
+    await hero.close().catch(Logger.error);
   }
-  await HeroCore.shutdown().catch(console.error);
+  await HeroCore.shutdown().catch(Logger.error);
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  console.log('Shutting down server...');
+  Logger.info('Shutting down server...');
   // Close all hero instances
   for (const hero of heroPool) {
-    await hero.close().catch(console.error);
+    await hero.close().catch(Logger.error);
   }
-  await HeroCore.shutdown().catch(console.error);
+  await HeroCore.shutdown().catch(Logger.error);
   process.exit(0);
 });
 
 // Initialize the pool at server startup
-initializeHeroPool().catch(console.error);
+initializeHeroPool().catch(Logger.error);

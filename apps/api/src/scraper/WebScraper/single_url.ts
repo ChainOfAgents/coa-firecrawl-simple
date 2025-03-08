@@ -40,11 +40,11 @@ export const callWebhook = async (
         },
       );
 
-      Logger.debug(`Webhook sent for scrape ID: ${scrapeId}`);
+      Logger.info(`Successfully sent webhook for scrape ID: ${scrapeId}`);
       break;
     } catch (error) {
-      Logger.debug(
-        `Error sending webhook to ${webhookUrl} for scrape ID: ${scrapeId}, retry ${retryCount}. Error: ${error}`,
+      Logger.error(
+        `Failed to send webhook to ${webhookUrl} for scrape ID: ${scrapeId}, retry ${retryCount}. Error: ${error}`,
       );
     }
 

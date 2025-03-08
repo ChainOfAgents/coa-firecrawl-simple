@@ -1,0 +1,164 @@
+steps:
+  # Build the Ulixee service image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-ulixee'
+    args:
+      [
+        'build',
+        '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:${_TAG}',
+        '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:latest',
+        '-f', 'apps/ulixee-service-ts/Dockerfile',
+        'apps/ulixee-service-ts'
+      ]
+    
+  # Push Ulixee images
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-ulixee'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:${_TAG}']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:latest']
+
+  # Build the Playwright service image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-playwright'
+    args:
+      [
+        'build',
+        '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:${_TAG}',
+        '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:latest',
+        '-f', 'apps/playwright-service-ts/Dockerfile',
+        'apps/playwright-service-ts'
+      ]
+    
+  # Push Playwright images
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-playwright'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:${_TAG}']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:latest']
+
+  # Build the unified image (API and Worker)
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-unified'
+    args:
+      [
+        'build',
+        '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-unified:${_TAG}',
+        '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-unified:latest',
+        '-f', 'apps/api/Dockerfile.unified',
+        'apps/api'
+      ]
+    
+  # Push unified images
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-unified'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-unified:${_TAG}']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-unified:latest']
+
+  # Deploy all services to Cloud Run in correct order
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-all'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # 1. Deploy Ulixee service first
+        echo "Deploying Ulixee service..."
+        gcloud run deploy ulixee-service-firecrawl-simple \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:${_TAG} \
+          --platform=managed \
+          --region=${_REGION} \
+          --cpu=1 \
+          --memory=2Gi \
+          --concurrency=80 \
+          --timeout=300s \
+          --min-instances=1 \
+          --max-instances=10 \
+          --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
+          --command="node" --args="dist/api.js" \
+          --port=8080 \
+          --set-env-vars="NODE_ENV=production,PROXY_URL=,PROXY_USERNAME=,PROXY_PASSWORD=,RUNNING_IN_CLOUD=true,CHROME_SANDBOX=false,HERO_MAX_CONCURRENT_BROWSERS=10,ULIXEE_DATABOX_SIZE_MB=100,NODE_OPTIONS=--max-old-space-size=2048"
+        
+        # 2. Deploy Playwright service
+        echo "Deploying Playwright service..."
+        gcloud run deploy playwright-service-firecrawl-simple \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:${_TAG} \
+          --platform=managed \
+          --region=${_REGION} \
+          --cpu=1 \
+          --memory=2Gi \
+          --concurrency=80 \
+          --timeout=300s \
+          --min-instances=1 \
+          --max-instances=10 \
+          --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
+          --command="node" --args="dist/api.js" \
+          --port=8080 \
+          --set-env-vars="NODE_ENV=production,PROXY_URL=,PROXY_USERNAME=,PROXY_PASSWORD=,RUNNING_IN_CLOUD=true,CHROME_SANDBOX=false,MAX_CONCURRENT_BROWSERS=10,NODE_OPTIONS=--max-old-space-size=2048"
+        
+        # 3. Deploy API service with hardcoded service URLs
+        echo "Deploying API service..."
+        gcloud run deploy api-service-firecrawl-simple \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-unified:${_TAG} \
+          --platform=managed \
+          --region=${_REGION} \
+          --cpu=1 \
+          --memory=1Gi \
+          --concurrency=80 \
+          --timeout=600s \
+          --command="node" --args="dist/src/index.js" \
+          --vpc-connector=crawlweb-connector \
+          --min-instances=0 \
+          --max-instances=10 \
+          --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
+          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks-queue,CLOUD_TASKS_SERVICE_URL=https://worker-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app,CLOUD_TASKS_SERVICE_ACCOUNT_EMAIL=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com,PLAYWRIGHT_MICROSERVICE_URL=https://playwright-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app/scrape,ULIXEE_MICROSERVICE_URL=https://ulixee-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app/scrape"
+        
+        echo "API service deployed successfully."
+        
+        # 4. Deploy Worker service last
+        echo "Deploying Worker service..."
+        gcloud run deploy worker-service-firecrawl-simple \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-unified:${_TAG} \
+          --platform=managed \
+          --region=${_REGION} \
+          --cpu=1 \
+          --memory=1Gi \
+          --concurrency=20 \
+          --timeout=600s \
+          --command="node" --args="dist/src/services/task-worker.js" \
+          --vpc-connector=crawlweb-connector \
+          --min-instances=1 \
+          --max-instances=5 \
+          --service-account=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com \
+          --set-env-vars="NODE_ENV=production,NUM_WORKERS_PER_QUEUE=8,LOGGING_LEVEL=DEBUG,QUEUE_PROVIDER=cloud-tasks,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${_REGION},CLOUD_TASKS_QUEUE=crawlweb-tasks-queue,CLOUD_TASKS_SERVICE_ACCOUNT_EMAIL=crawlweb-sa@${PROJECT_ID}.iam.gserviceaccount.com,PLAYWRIGHT_MICROSERVICE_URL=https://playwright-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app/scrape,ULIXEE_MICROSERVICE_URL=https://ulixee-service-firecrawl-simple-${_PROJECT_NUMBER}.${_REGION}.run.app/scrape"
+        
+        echo "Worker service deployed successfully."
+        
+        # 5. Grant Cloud Tasks service account permission to invoke the worker service
+        echo "Granting Cloud Tasks permissions..."
+        gcloud run services add-iam-policy-binding worker-service-firecrawl-simple \
+          --member=serviceAccount:service-${_PROJECT_NUMBER}@gcp-sa-cloudtasks.iam.gserviceaccount.com \
+          --role=roles/run.invoker \
+          --region=${_REGION}
+        
+        echo "All services deployed successfully!"
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:${_TAG}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/ulixee-service:latest'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:${_TAG}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/playwright-service:latest'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-unified:${_TAG}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/docker-repo/crawlweb-unified:latest'
+
+substitutions:
+  _TAG: v1
+  _REGION: us-west2
+  _PROJECT_NUMBER: "475988465347"
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+  
+tags: ['api-service', 'worker-service', 'ulixee-service', 'playwright-service', 'firecrawl-simple']

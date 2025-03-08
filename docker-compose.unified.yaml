@@ -8,7 +8,7 @@ x-common-service: &common-service
     - backend
   environment:
     - NODE_ENV=development
-    - PLAYWRIGHT_MICROSERVICE_URL=http://ulixee-service:3000/scrape
+    - PLAYWRIGHT_MICROSERVICE_URL=http://playwright-service:3003/scrape
     - NUM_WORKERS_PER_QUEUE=8
     - TEST_API_KEY=${TEST_API_KEY}
     - LOGGING_LEVEL=DEBUG
@@ -46,17 +46,40 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix
     restart: unless-stopped
 
+  playwright-service:
+    image: firecrawl/playwright-service
+    build:
+      context: ./apps/playwright-service-ts/
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      - PORT=3003
+      - PROXY_URL=${PROXY_URL}
+      - PROXY_USERNAME=${PROXY_USERNAME}
+      - PROXY_PASSWORD=${PROXY_PASSWORD}
+      - BLOCK_MEDIA=true
+      - NODE_OPTIONS=--max-old-space-size=2048
+      - CHROME_SANDBOX=false
+    ports:
+      - "3003:3003"
+    networks:
+      - backend
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    restart: unless-stopped
+
   api:
     <<: *common-service
     depends_on:
       - redis
       - ulixee-service
+      - playwright-service
     ports:
       - "3002:3002"
     environment:
       - PORT=3002
       - NODE_ENV=development
-      - PLAYWRIGHT_MICROSERVICE_URL=http://ulixee-service:3000/scrape
+      - PLAYWRIGHT_MICROSERVICE_URL=http://playwright-service:3003/scrape
       - NUM_WORKERS_PER_QUEUE=8
       - LOGGING_LEVEL=DEBUG
       - QUEUE_PROVIDER=bull
@@ -68,11 +91,12 @@ services:
     depends_on:
       - redis
       - ulixee-service
+      - playwright-service
       - api
     environment:
-      - PORT=3003
+      - PORT=3004
       - NODE_ENV=development
-      - PLAYWRIGHT_MICROSERVICE_URL=http://ulixee-service:3000/scrape
+      - PLAYWRIGHT_MICROSERVICE_URL=http://playwright-service:3003/scrape
       - NUM_WORKERS_PER_QUEUE=8
       - LOGGING_LEVEL=DEBUG
       - QUEUE_PROVIDER=bull

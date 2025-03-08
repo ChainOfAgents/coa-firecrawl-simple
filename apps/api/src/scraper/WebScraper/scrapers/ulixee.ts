@@ -26,7 +26,7 @@ export async function scrapeWithUlixee(
   };
 
   if (!process.env.ULIXEE_MICROSERVICE_URL) {
-    Logger.error("⛏️ Ulixee: ULIXEE_MICROSERVICE_URL not set");
+    Logger.error("Ulixee: ULIXEE_MICROSERVICE_URL not set");
     return {
       content: "",
       pageStatusCode: null,
@@ -51,8 +51,8 @@ export async function scrapeWithUlixee(
     );
 
     if (response.status !== 200) {
-      Logger.debug(
-        `⛏️ Ulixee: Failed to fetch url: ${url} with status: ${response.status}`
+      Logger.error(
+        `Ulixee: Failed to fetch url: ${url} with status: ${response.status}`
       );
       logParams.error_message = response.statusText;
       logParams.response_code = response.status;
@@ -76,10 +76,10 @@ export async function scrapeWithUlixee(
   } catch (error) {
     if (error.code === "ECONNABORTED") {
       logParams.error_message = "Request timed out";
-      Logger.debug(`⛏️ Ulixee: Request timed out for ${url}`);
+      Logger.error(`Ulixee: Request timed out for ${url} after ${universalTimeout}ms`);
     } else {
       logParams.error_message = error.message || error;
-      Logger.debug(`⛏️ Ulixee: Failed to fetch url: ${url} | Error: ${error}`);
+      Logger.error(`Ulixee: Failed to fetch url: ${url} | Error: ${error}`);
     }
     return {
       content: "",

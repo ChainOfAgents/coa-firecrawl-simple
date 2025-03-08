@@ -4,6 +4,7 @@ import { chromium, Browser, BrowserContext, Route, Request as PlaywrightRequest,
 import dotenv from 'dotenv';
 import UserAgent from 'user-agents';
 import { getError } from './helpers/get_error';
+import { Logger } from './lib/logger';
 
 dotenv.config();
 
@@ -94,7 +95,7 @@ const initializeBrowser = async () => {
     const hostname = requestUrl.hostname;
 
     if (AD_SERVING_DOMAINS.some(domain => hostname.includes(domain))) {
-      console.log(hostname);
+      Logger.debug(`Blocking ad domain: ${hostname}`);
       return route.abort();
     }
     return route.continue();
@@ -120,7 +121,7 @@ const isValidUrl = (urlString: string): boolean => {
 };
 
 const scrapePage = async (page: Page, url: string, waitUntil: 'load' | 'networkidle', waitAfterLoad: number, timeout: number, checkSelector: string | undefined) => {
-  console.log(`Navigating to ${url} with waitUntil: ${waitUntil} and timeout: ${timeout}ms`);
+  Logger.info(`Navigating to ${url} with waitUntil: ${waitUntil} and timeout: ${timeout}ms`);
   const response = await page.goto(url, { waitUntil, timeout });
 
   if (waitAfterLoad > 0) {
@@ -154,13 +155,13 @@ const scrapePage = async (page: Page, url: string, waitUntil: 'load' | 'networki
 app.post('/scrape', async (req: Request, res: Response) => {
   const { url, wait_after_load = 0, timeout = 15000, headers, check_selector }: UrlModel = req.body;
 
-  console.log(`================= Scrape Request =================`);
-  console.log(`URL: ${url}`);
-  console.log(`Wait After Load: ${wait_after_load}`);
-  console.log(`Timeout: ${timeout}`);
-  console.log(`Headers: ${headers ? JSON.stringify(headers) : 'None'}`);
-  console.log(`Check Selector: ${check_selector ? check_selector : 'None'}`);
-  console.log(`==================================================`);
+  Logger.info('================= Scrape Request =================');
+  Logger.info(`URL: ${url}`);
+  Logger.info(`Wait After Load: ${wait_after_load}`);
+  Logger.info(`Timeout: ${timeout}`);
+  Logger.info(`Headers: ${headers ? JSON.stringify(headers) : 'None'}`);
+  Logger.info(`Check Selector: ${check_selector ? check_selector : 'None'}`);
+  Logger.info('==================================================');
 
   if (!url) {
     return res.status(400).json({ error: 'URL is required' });
@@ -171,7 +172,7 @@ app.post('/scrape', async (req: Request, res: Response) => {
   }
 
   if (!PROXY_SERVER) {
-    console.warn('⚠️ WARNING: No proxy server provided. Your IP address may be blocked.');
+    Logger.warn('WARNING: No proxy server provided. Your IP address may be blocked.');
   }
 
   if (!browser || !context) {
@@ -188,10 +189,10 @@ app.post('/scrape', async (req: Request, res: Response) => {
   let result: Awaited<ReturnType<typeof scrapePage>>;
   try {
     // Strategy 1: Normal
-    console.log('Attempting strategy 1: Normal load');
+    Logger.info('Attempting strategy 1: Normal load');
     result = await scrapePage(page, url, 'load', wait_after_load, timeout, check_selector);
   } catch (error) {
-    console.log('Strategy 1 failed, attempting strategy 2: Wait until networkidle');
+    Logger.info('Strategy 1 failed, attempting strategy 2: Wait until networkidle');
     try {
       // Strategy 2: Wait until networkidle
       result = await scrapePage(page, url, 'networkidle', wait_after_load, timeout, check_selector);
@@ -204,9 +205,9 @@ app.post('/scrape', async (req: Request, res: Response) => {
   const pageError = result.status !== 200 ? getError(result.status) : undefined;
 
   if (!pageError) {
-    console.log(`✅ Scrape successful!`);
+    Logger.info(`✅ Scrape successful!`);
   } else {
-    console.log(`🚨 Scrape failed with status code: ${result.status} ${pageError}`);
+    Logger.info(`🚨 Scrape failed with status code: ${result.status} ${pageError}`);
   }
 
   await page.close();
@@ -220,13 +221,13 @@ app.post('/scrape', async (req: Request, res: Response) => {
 
 app.listen(port, () => {
   initializeBrowser().then(() => {
-    console.log(`Server is running on port ${port}`);
+    Logger.info(`Server is running on port ${port}`);
   });
 });
 
 process.on('SIGINT', () => {
   shutdownBrowser().then(() => {
-    console.log('Browser closed');
+    Logger.info('Browser closed');
     process.exit(0);
   });
 });

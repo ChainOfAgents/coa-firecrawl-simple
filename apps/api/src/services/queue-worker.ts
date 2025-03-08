@@ -91,44 +91,30 @@ export async function processJobInternal(token: string, job: QueueJob) {
   Logger.info(`[Job ${job.id}] Starting job processing`);
   
   try {
-    Logger.debug(`[Job ${job.id}] Processing job with token: ${token}`);
     const result = await processJob(job, token);
-    Logger.debug(`[Job ${job.id}] Job processing completed, moving to completion phase`);
     
     try {
-      Logger.debug(`[Job ${job.id}] Attempting to move job to completed state`);
       try {
         await job.moveToCompleted(result.docs);
-        Logger.debug(`[Job ${job.id}] Successfully moved job to completed state`);
+        Logger.info(`[Job ${job.id}] Successfully completed job`);
         
-        // Verify job state after completion
         const state = await getScrapeQueue().getJobState(job.id);
-        Logger.debug(`[Job ${job.id}] Job state after completion: ${state}`);
       } catch (e) {
         Logger.error(`[Job ${job.id}] Error moving job to completed state: ${e.message}`);
-        // Try again with a different approach
         try {
-          Logger.debug(`[Job ${job.id}] Attempting alternative completion strategy`);
           await job.updateProgress(100);
-          Logger.debug(`[Job ${job.id}] Updated progress to 100%`);
           
-          // Update the job data in Redis directly through the queue
-          Logger.debug(`[Job ${job.id}] Adding completed job data to queue`);
           await getScrapeQueue().addJob(
             job.name,
             { ...job.data, completed: true, success: true, docs: result.docs },
             { jobId: job.id, priority: job.opts.priority }
           );
-          Logger.debug(`[Job ${job.id}] Alternative completion strategy succeeded`);
+          Logger.info(`[Job ${job.id}] Successfully completed job using alternative method`);
           
-          // Double check the job state
           const state = await getScrapeQueue().getJobState(job.id);
-          Logger.debug(`[Job ${job.id}] Job state after alternative completion: ${state}`);
         } catch (altError) {
           Logger.error(`[Job ${job.id}] Alternative completion strategy failed: ${altError.message}`);
-          // Last resort - try to remove the job and mark it as completed
           try {
-            Logger.debug(`[Job ${job.id}] Attempting last resort - removing job`);
             await getScrapeQueue().removeJob(job.id);
             Logger.info(`[Job ${job.id}] Successfully removed job as last resort`);
           } catch (removeError) {
@@ -142,7 +128,6 @@ export async function processJobInternal(token: string, job: QueueJob) {
     }
   } catch (e) {
     Logger.error(`[Job ${job.id}] Error during job processing: ${e.message}`);
-    Logger.debug(`[Job ${job.id}] Error stack trace: ${e.stack}`);
     try {
       Logger.info(`[Job ${job.id}] Moving job to failed state`);
       await job.moveToFailed(e);
@@ -157,7 +142,6 @@ export async function processJobInternal(token: string, job: QueueJob) {
 async function processJob(job: QueueJob, token: string) {
   const startTime = Date.now();
   Logger.info(`[Job ${job.id}] Starting web scraper pipeline`);
-  Logger.debug(`[Job ${job.id}] Processing job with data: ${JSON.stringify(job.data)}`);
 
   // Check blocked URLs
   if (
@@ -191,7 +175,6 @@ async function processJob(job: QueueJob, token: string) {
       Logger.info(`[Job ${job.id}] Starting web scraper pipeline execution`);
       const { success, message, docs } = await startWebScraperPipeline({ job, token });
       Logger.info(`[Job ${job.id}] Web scraper pipeline completed`);
-      Logger.debug(`[Job ${job.id}] Pipeline result: success=${success}, message=${message}, docs.length=${docs?.length}`);
 
       if (!success) {
         Logger.error(`[Job ${job.id}] Pipeline failed: ${message}`);
@@ -236,7 +219,7 @@ async function processCrawlLinks(job: QueueJob, docs: any[], sc: StoredCrawl) {
         // Check if URL is locked (being processed by another crawler)
         const isLocked = await lockURL(url, job.data.crawl_id);
         if (!isLocked) {
-          Logger.debug(`[Job ${job.id}] URL ${url} is already being processed, skipping`);
+          Logger.info(`[Job ${job.id}] URL ${url} is already being processed, skipping`);
           continue;
         }
 
@@ -272,67 +255,63 @@ async function processCrawlLinks(job: QueueJob, docs: any[], sc: StoredCrawl) {
 let isShuttingDown = false;
 
 process.on("SIGINT", () => {
-  console.log("Received SIGINT. Shutting down gracefully...");
+  Logger.info("Received SIGINT. Shutting down gracefully...");
   isShuttingDown = true;
+  process.exit(0);
 });
 
 async function workerFun(
   queueName: string,
   processJobInternal: (token: string, job: QueueJob) => Promise<any>,
 ) {
-  Logger.info(`Starting worker for queue: ${queueName}`);
-  const queue = getScrapeQueue();
-  let emptyPolls = 0;
+  let consecutiveEmptyPolls = 0;
+  let currentInterval = BASE_EMPTY_INTERVAL;
 
   while (!isShuttingDown) {
     try {
       // Check system resources
       const monitor = await systemMonitor;
       const { cpu, memory } = await monitor.getSystemMetrics();
+      
       if (cpu > MAX_CPU || memory > MAX_RAM) {
-        Logger.warn(
-          `System resources too high (CPU: ${cpu}, RAM: ${memory}), waiting ${cantAcceptConnectionInterval}ms`
-        );
+        Logger.info(`High resource usage detected - CPU: ${cpu.toFixed(2)}, Memory: ${memory.toFixed(2)}`);
         await sleep(cantAcceptConnectionInterval);
         continue;
       }
 
-      // Get next job
-      const job = await queue.getNextJob?.();
+      const queue = getScrapeQueue();
+      const token = uuidv4();
 
+      const job = await queue.getNextJob();
+      
       if (!job) {
-        emptyPolls++;
-        // Exponential backoff for empty polls
-        const waitTime = Math.min(
-          BASE_EMPTY_INTERVAL * Math.pow(2, emptyPolls),
-          cantAcceptConnectionInterval
-        );
-        await sleep(waitTime);
+        consecutiveEmptyPolls++;
+        if (consecutiveEmptyPolls >= MAX_EMPTY_POLLS) {
+          currentInterval = Math.min(currentInterval * 2, cantAcceptConnectionInterval);
+        }
+        await sleep(currentInterval);
         continue;
       }
 
-      // Reset empty polls counter when we get a job
-      emptyPolls = 0;
+      consecutiveEmptyPolls = 0;
+      currentInterval = BASE_EMPTY_INTERVAL;
 
       try {
-        const token = uuidv4();
         await processJobInternal(token, job);
       } catch (error) {
         Logger.error(`Error processing job ${job.id}: ${error.message}`);
         if (error.stack) {
-          Logger.debug(`Error stack trace: ${error.stack}`);
+          Logger.error(`Error stack trace: ${error.stack}`);
         }
+        // Wait longer on error
+        await sleep(connectionMonitorInterval * 2);
       }
-
-      // Wait a bit before processing next job
-      await sleep(gotJobInterval);
     } catch (error) {
       Logger.error(`Worker error: ${error.message}`);
       if (error.stack) {
-        Logger.debug(`Error stack trace: ${error.stack}`);
+        Logger.error(`Error stack trace: ${error.stack}`);
       }
-      // Wait longer on error
-      await sleep(connectionMonitorInterval * 2);
+      await sleep(cantAcceptConnectionInterval);
     }
   }
 }

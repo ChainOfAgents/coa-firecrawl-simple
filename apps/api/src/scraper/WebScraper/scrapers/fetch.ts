@@ -31,8 +31,8 @@ export async function scrapeWithFetch(
     });
 
     if (response.status !== 200) {
-      Logger.debug(
-        `⛏️ Axios: Failed to fetch url: ${url} with status: ${response.status}`
+      Logger.error(
+        `Axios: Failed to fetch url: ${url} with status: ${response.status}`
       );
       logParams.error_message = response.statusText;
       logParams.response_code = response.status;
@@ -51,10 +51,10 @@ export async function scrapeWithFetch(
   } catch (error) {
     if (error.code === "ECONNABORTED") {
       logParams.error_message = "Request timed out";
-      Logger.debug(`⛏️ Axios: Request timed out for ${url}`);
+      Logger.error(`Axios: Request timed out for ${url} after ${universalTimeout}ms`);
     } else {
       logParams.error_message = error.message || error;
-      Logger.debug(`⛏️ Axios: Failed to fetch url: ${url} | Error: ${error}`);
+      Logger.error(`Axios: Failed to fetch url: ${url} | Error: ${error}`);
     }
     return {
       content: "",

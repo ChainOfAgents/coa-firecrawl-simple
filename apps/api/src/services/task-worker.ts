@@ -9,7 +9,6 @@ const app = express();
 const port = process.env.PORT || 3002; // Worker service port
 const host = process.env.HOST || '0.0.0.0';
 
-console.log(`Starting worker service on ${host}:${port}`);
 Logger.info(`Starting worker service on ${host}:${port}`);
 Logger.info(`Environment: ${process.env.NODE_ENV}`);
 Logger.info(`Log level: ${process.env.LOGGING_LEVEL}`);
@@ -22,17 +21,11 @@ app.use(express.json());
 // Health check endpoint
 app.get('/health', (req, res) => {
   Logger.info('[WORKER] Health check');
-  console.log('[WORKER] Health check');
   res.status(200).send('Worker is healthy');
 });
 
 // Task processing endpoint
-app.post('/tasks/process', async (req, res) => {
-  console.log(`[WORKER] Received task request: ${JSON.stringify({
-    headers: req.headers,
-    body: req.body
-  }, null, 2)}`);
-  
+app.post('/tasks/process', async (req, res) => {  
   Logger.info(`[WORKER] Received task request`);
   
   const taskName = req.header('X-CloudTasks-TaskName');
@@ -64,7 +57,6 @@ app.post('/tasks/process', async (req, res) => {
     const jobId = options?.jobId || cloudTasksId;
     
     Logger.info(`[WORKER] Processing task ${jobId} (Cloud Tasks ID: ${cloudTasksId}) from queue ${queueName}`);
-    console.log(`[WORKER] Processing task ${jobId} (Cloud Tasks ID: ${cloudTasksId}) from queue ${queueName}`);
 
     try {
       // Create a job instance with the required data
@@ -77,19 +69,15 @@ app.post('/tasks/process', async (req, res) => {
       });
 
       Logger.info(`[WORKER] Created job instance for ${jobId}`);
-      console.log(`[WORKER] Created job instance for ${jobId}`);
 
       // Mark job as started
       try {
         await stateManager.markJobStarted(jobId);
         Logger.info(`[WORKER] Marked job ${jobId} as started`);
-        console.log(`[WORKER] Marked job ${jobId} as started`);
       } catch (firestoreError) {
         // Log the error but continue with the job
         Logger.error(`[WORKER] Error marking job ${jobId} as started in Firestore: ${firestoreError}`);
-        console.error(`[WORKER] Error marking job ${jobId} as started in Firestore: ${firestoreError}`);
         Logger.error(`[WORKER] Firestore error details: ${JSON.stringify(firestoreError)}`);
-        console.error(`[WORKER] Firestore error details: ${JSON.stringify(firestoreError)}`);
         
         // Check if the job exists in Firestore
         try {
@@ -116,7 +104,6 @@ app.post('/tasks/process', async (req, res) => {
 
       // Process the job
       Logger.info(`[WORKER] Starting web scraper pipeline for ${jobId}`);
-      console.log(`[WORKER] Starting web scraper pipeline for ${jobId}`);
       
       let result;
       try {
@@ -132,7 +119,6 @@ app.post('/tasks/process', async (req, res) => {
         });
 
         Logger.info(`[WORKER] Web scraper pipeline completed for ${jobId}: ${JSON.stringify(result)}`);
-        console.log(`[WORKER] Web scraper pipeline completed for ${jobId}: ${JSON.stringify(result)}`);
 
         if (!result.success) {
           throw new Error(result.message || 'Job failed');
@@ -146,13 +132,10 @@ app.post('/tasks/process', async (req, res) => {
           
           await stateManager.markJobCompleted(jobId, result);
           Logger.info(`[WORKER] Marked job ${jobId} as completed`);
-          console.log(`[WORKER] Marked job ${jobId} as completed`);
         } catch (firestoreError) {
           // Log the error but continue with the job
           Logger.error(`[WORKER] Error marking job ${jobId} as completed in Firestore: ${firestoreError}`);
-          console.error(`[WORKER] Error marking job ${jobId} as completed in Firestore: ${firestoreError}`);
           Logger.error(`[WORKER] Firestore error details: ${JSON.stringify(firestoreError)}`);
-          console.error(`[WORKER] Firestore error details: ${JSON.stringify(firestoreError)}`);
           
           // Try again with a simplified result
           try {
@@ -180,11 +163,9 @@ app.post('/tasks/process', async (req, res) => {
         try {
           await stateManager.markJobFailed(jobId, error);
           Logger.info(`[WORKER] Marked job ${jobId} as failed`);
-          console.log(`[WORKER] Marked job ${jobId} as failed`);
         } catch (firestoreError) {
           // Log the error but continue with the job
           Logger.error(`[WORKER] Error marking job ${jobId} as failed in Firestore: ${firestoreError}`);
-          console.error(`[WORKER] Error marking job ${jobId} as failed in Firestore: ${firestoreError}`);
         }
 
         // Still return 200 to acknowledge the task
@@ -198,7 +179,6 @@ app.post('/tasks/process', async (req, res) => {
     } catch (error) {
       // This catches errors in parsing the request body or other setup issues
       Logger.error(`[WORKER] Error handling task ${cloudTasksId}: ${error}`);
-      console.error(`[WORKER] Error handling task ${cloudTasksId}: ${error}`);
       
       // Return 200 to acknowledge the task but indicate failure
       res.status(200).json({ 
@@ -209,7 +189,6 @@ app.post('/tasks/process', async (req, res) => {
   } catch (error) {
     // This catches errors in parsing the request body or other setup issues
     Logger.error(`[WORKER] Error handling task ${cloudTasksId}: ${error}`);
-    console.error(`[WORKER] Error handling task ${cloudTasksId}: ${error}`);
     
     // Return 200 to acknowledge the task but indicate failure
     res.status(200).json({ 
@@ -222,7 +201,6 @@ app.post('/tasks/process', async (req, res) => {
 // Add a test endpoint to simulate receiving a task
 app.post('/test/task', async (req, res) => {
   Logger.info('[WORKER] Received test task request');
-  console.log('[WORKER] Received test task request');
   
   try {
     // Create a mock task name
@@ -233,7 +211,6 @@ app.post('/test/task', async (req, res) => {
     
     // Log the mock task
     Logger.info(`[WORKER] Processing mock task ${jobId} with name ${name} and URL ${url}`);
-    console.log(`[WORKER] Processing mock task ${jobId} with name ${name} and URL ${url}`);
     
     // Create a job instance with the test data
     const job = new CloudTasksJob(
@@ -292,7 +269,6 @@ app.post('/test/task', async (req, res) => {
     } catch (firestoreError) {
       // Log the error but continue with the job
       Logger.error(`[WORKER] Error marking test job ${jobId} as completed in Firestore: ${firestoreError}`);
-      console.error(`[WORKER] Error marking test job ${jobId} as completed in Firestore: ${firestoreError}`);
     }
 
     // Respond with success
@@ -304,7 +280,6 @@ app.post('/test/task', async (req, res) => {
     });
   } catch (error) {
     Logger.error(`[WORKER] Error processing test task: ${error}`);
-    console.error(`[WORKER] Error processing test task: ${error}`);
     
     res.status(500).json({ 
       success: false, 
@@ -316,5 +291,4 @@ app.post('/test/task', async (req, res) => {
 // Start the server
 app.listen(Number(port), host, () => {
   Logger.info(`Worker service listening on port ${port}`);
-  console.log(`Worker service listening on port ${port}`);
 });

@@ -75,7 +75,7 @@ export class WebCrawler {
   public async tryGetSitemap(): Promise<
     { url: string; html: string }[] | null
   > {
-    Logger.debug(`Fetching sitemap links from ${this.initialUrl}`);
+    Logger.info(`Fetching sitemap links from ${this.initialUrl}`);
     const sitemapLinks = await this.tryFetchSitemapLinks(this.initialUrl);
     if (sitemapLinks.length > 0) {
       let filteredLinks = sitemapLinks
@@ -94,14 +94,14 @@ export class WebCrawler {
     limit: number = 10000,
     maxDepth: number = 10,
   ): Promise<{ url: string; html: string }[]> {
-    Logger.debug(`Crawler starting with ${this.initialUrl}`);
+    Logger.info(`Starting crawler for ${this.initialUrl}`);
     // Fetch and parse robots.txt
     try {
       const txt = await this.getRobotsTxt();
       this.importRobotsTxt(txt);
-      Logger.debug(`Crawler robots.txt fetched with ${this.robotsTxtUrl}`);
+      Logger.info(`Successfully fetched robots.txt from ${this.robotsTxtUrl}`);
     } catch (error) {
-      Logger.debug(`Failed to fetch robots.txt from ${this.robotsTxtUrl}`);
+      Logger.error(`Failed to fetch robots.txt from ${this.robotsTxtUrl}: ${error.message}`);
     }
 
     if (!crawlerOptions?.ignoreSitemap) {
@@ -137,7 +137,7 @@ export class WebCrawler {
     inProgress?: (progress: Progress) => void,
   ): Promise<{ url: string; html: string }[]> {
     const queue = async.queue(async (task: string, callback) => {
-      Logger.debug(`Crawling ${task}`);
+      Logger.info(`Crawling URL: ${task}`);
       if (this.crawledUrls.size >= Math.min(this.maxCrawledLinks, this.limit)) {
         if (callback && typeof callback === "function") {
           callback();
@@ -174,7 +174,7 @@ export class WebCrawler {
       }
     }, concurrencyLimit);
 
-    Logger.debug(`🐂 Pushing ${urls.length} URLs to the queue`);
+    Logger.info(`Adding ${urls.length} URLs to the crawl queue`);
     queue.push(
       urls.filter(
         (url) =>
@@ -182,11 +182,11 @@ export class WebCrawler {
           this.robots.isAllowed(url, "FireCrawlAgent"),
       ),
       (err) => {
-        if (err) Logger.error(`🐂 Error pushing URLs to the queue: ${err}`);
+        if (err) Logger.error(`Error adding URLs to the crawl queue: ${err}`);
       },
     );
     await queue.drain();
-    Logger.debug(`🐂 Crawled ${this.crawledUrls.size} URLs, Queue drained.`);
+    Logger.info(`Completed crawling ${this.crawledUrls.size} URLs`);
     return Array.from(this.crawledUrls.entries()).map(([url, html]) => ({
       url,
       html,
@@ -223,17 +223,6 @@ export class WebCrawler {
       return fullUrl;
     }
 
-    // Logger.debug(
-    //   `Link filtered out: ${fullUrl} with tests: isInternalLink: ${this.isInternalLink(
-    //     fullUrl
-    //   )}, allowExternalLinks: ${
-    //     this.allowExternalLinks
-    //   }, isSocialMediaOrEmail: ${this.isSocialMediaOrEmail(
-    //     fullUrl
-    //   )}, matchesExcludes: ${this.matchesExcludes(
-    //     fullUrl
-    //   )}, matchesIncludes: ${this.matchesIncludes(fullUrl)}`
-    // );
     return null;
   }
 
@@ -259,7 +248,7 @@ export class WebCrawler {
 
     const dedupedLinks = [...new Set(links)];
 
-    Logger.debug(`WebCrawler extracted ${dedupedLinks.length} links from HTML`);
+    Logger.info(`WebCrawler extracted ${dedupedLinks.length} links from HTML`);
 
     return dedupedLinks;
   }
@@ -338,7 +327,7 @@ export class WebCrawler {
           ? links
           : links.filter((link) => !this.visited.has(link.url));
 
-      Logger.debug(`Crawled ${url} and found ${resLinks.length} links`);
+      Logger.info(`Crawled ${url} and found ${resLinks.length} links`);
 
       return resLinks;
     } catch (error) {
@@ -510,7 +499,7 @@ export class WebCrawler {
         sitemapLinks = await getLinksFromSitemap({ sitemapUrl });
       }
     } catch (error) {
-      Logger.debug(
+      Logger.info(
         `Failed to fetch sitemap with axios from ${sitemapUrl}: ${error}`,
       );
     }
@@ -527,7 +516,7 @@ export class WebCrawler {
           });
         }
       } catch (error) {
-        Logger.debug(
+        Logger.info(
           `Failed to fetch sitemap from ${baseUrlSitemap}: ${error}`,
         );
       }
