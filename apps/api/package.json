@@ -48,7 +48,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express-ws": "^5.0.2",
-    "glob": "^10.4.2",
+    "glob": "^11.1.0",
     "ioredis": "^5.4.1",
     "joplin-turndown-plugin-gfm": "^1.0.12",
     "koffi": "^2.9.0",
