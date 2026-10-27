@@ -3,15 +3,14 @@ FROM node:20-slim AS base
 # Create app directory
 WORKDIR /app
 
-# Install pnpm
-RUN npm install -g pnpm corepack@latest
-RUN corepack enable
+# Install pnpm directly without corepack
+RUN npm install -g pnpm@8.6.0
 
 # Copy package files
 COPY ./package.json ./pnpm-lock.yaml ./
 
 # Install dependencies
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --force
 
 # Install necessary build dependencies
 RUN apt-get update -qq && \
